@@ -23,6 +23,26 @@ class SgfParseError(ValueError):
     """Raised when an SGF cannot be parsed by this package."""
 
 
+class MalformedSgfError(SgfParseError):
+    """Raised when SGF bytes cannot be parsed as a coherent game record."""
+
+
+class SgfReadError(SgfParseError):
+    """Raised when an SGF file cannot be read from disk."""
+
+
+class UnsupportedSgfFeatureError(SgfParseError):
+    """Raised when an SGF uses a valid feature outside the supported subset."""
+
+
+class UnsupportedHandicapError(UnsupportedSgfFeatureError):
+    """Raised when an SGF contains handicap game metadata."""
+
+
+class UnsupportedSetupStonesError(UnsupportedSgfFeatureError):
+    """Raised when an SGF contains setup stone properties."""
+
+
 @dataclass(frozen=True, slots=True)
 class BoardPoint:
     """A 0-based top-left row/column board coordinate."""
@@ -77,7 +97,7 @@ def load_sgf(path: Path) -> ParsedGame:
         content = path.read_bytes()
     except OSError as exc:
         msg = f"unable to read SGF file {path}: {exc}"
-        raise SgfParseError(msg) from exc
+        raise SgfReadError(msg) from exc
     return parse_sgf_bytes(content, source_name=str(path))
 
 
@@ -89,11 +109,12 @@ def parse_sgf_bytes(content: bytes, source_name: str | None = None) -> ParsedGam
         game = sgf.Sgf_game.from_bytes(content)
     except Exception as exc:  # sgfmill raises several SGF parse exception types.
         msg = f"{resolved_source_name}: unable to parse SGF: {exc}"
-        raise SgfParseError(msg) from exc
+        raise MalformedSgfError(msg) from exc
 
     board_size = _get_board_size(game, resolved_source_name)
     sequence = game.get_main_sequence()
     _validate_game_type(game, resolved_source_name)
+    _reject_handicap(game, resolved_source_name)
     _reject_variations(sequence, resolved_source_name)
     _reject_setup_stones(sequence, resolved_source_name)
     _reject_invalid_move_nodes(sequence, resolved_source_name)
@@ -122,14 +143,14 @@ def _get_board_size(game: Any, source_name: str) -> int:
         board_size = game.get_size()
     except Exception as exc:
         msg = f"{source_name}: unable to read board size: {exc}"
-        raise SgfParseError(msg) from exc
+        raise MalformedSgfError(msg) from exc
 
     if not isinstance(board_size, int):
         msg = f"{source_name}: unsupported non-integer board size {board_size!r}"
-        raise SgfParseError(msg)
+        raise UnsupportedSgfFeatureError(msg)
     if board_size <= 0:
         msg = f"{source_name}: unsupported board size {board_size}"
-        raise SgfParseError(msg)
+        raise UnsupportedSgfFeatureError(msg)
     return board_size
 
 
@@ -148,14 +169,24 @@ def _validate_game_type(game: Any, source_name: str) -> None:
     game_type = _get_root_property(game, "GM")
     if game_type != "1":
         msg = f"{source_name}: unsupported SGF game type {game_type!r}; expected GM[1]"
-        raise SgfParseError(msg)
+        raise UnsupportedSgfFeatureError(msg)
+
+
+def _reject_handicap(game: Any, source_name: str) -> None:
+    root = game.get_root()
+    if _has_property(root, "HA"):
+        msg = (
+            f"{source_name}: unsupported handicap property HA; "
+            "handicap games are not supported by the SGF parser"
+        )
+        raise UnsupportedHandicapError(msg)
 
 
 def _reject_variations(main_sequence: list[Any], source_name: str) -> None:
     for node in main_sequence:
         if len(node) > 1:
             msg = f"{source_name}: unsupported variation branch in SGF"
-            raise SgfParseError(msg)
+            raise UnsupportedSgfFeatureError(msg)
 
 
 def _reject_setup_stones(sequence: list[Any], source_name: str) -> None:
@@ -167,7 +198,7 @@ def _reject_setup_stones(sequence: list[Any], source_name: str) -> None:
                     f"{source_name}: unsupported setup stone property {property_name}; "
                     "setup stones are not supported by the SGF parser"
                 )
-                raise SgfParseError(msg)
+                raise UnsupportedSetupStonesError(msg)
 
 
 def _reject_invalid_move_nodes(sequence: list[Any], source_name: str) -> None:
@@ -179,7 +210,7 @@ def _reject_invalid_move_nodes(sequence: list[Any], source_name: str) -> None:
                 f"{source_name}: unsupported move node with both B and W "
                 "properties"
             )
-            raise SgfParseError(msg)
+            raise UnsupportedSgfFeatureError(msg)
 
 
 def _parse_move(node: Any, board_size: int, source_name: str) -> ParsedMove:
@@ -187,19 +218,21 @@ def _parse_move(node: Any, board_size: int, source_name: str) -> ParsedMove:
         color, sgfmill_point = node.get_move()
     except Exception as exc:
         msg = f"{source_name}: unable to read move: {exc}"
-        raise SgfParseError(msg) from exc
+        raise MalformedSgfError(msg) from exc
 
     if color not in {"b", "w"}:
         msg = f"{source_name}: unsupported move color {color!r}"
-        raise SgfParseError(msg)
+        raise UnsupportedSgfFeatureError(msg)
 
     if sgfmill_point is None:
         return ParsedMove(color=color, point=None)
 
-    return ParsedMove(
-        color=color,
-        point=_from_sgfmill_point(sgfmill_point, board_size=board_size),
-    )
+    try:
+        point = _from_sgfmill_point(sgfmill_point, board_size=board_size)
+    except ValueError as exc:
+        msg = f"{source_name}: unable to read move: {exc}"
+        raise MalformedSgfError(msg) from exc
+    return ParsedMove(color=color, point=point)
 
 
 def _from_sgfmill_point(sgfmill_point: tuple[int, int], board_size: int) -> BoardPoint:

@@ -3,9 +3,14 @@
 from vantago.sgf.sgf_parser import (
     BoardPoint,
     GameMetadata,
+    MalformedSgfError,
     ParsedGame,
     ParsedMove,
     SgfParseError,
+    SgfReadError,
+    UnsupportedHandicapError,
+    UnsupportedSetupStonesError,
+    UnsupportedSgfFeatureError,
     load_sgf,
     parse_sgf_bytes,
 )
@@ -13,9 +18,14 @@ from vantago.sgf.sgf_parser import (
 __all__ = [
     "BoardPoint",
     "GameMetadata",
+    "MalformedSgfError",
     "ParsedGame",
     "ParsedMove",
     "SgfParseError",
+    "SgfReadError",
+    "UnsupportedHandicapError",
+    "UnsupportedSetupStonesError",
+    "UnsupportedSgfFeatureError",
     "load_sgf",
     "parse_sgf_bytes",
 ]
