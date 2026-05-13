@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from typing import Literal
 
 from vantago.replay.replay import IllegalMoveError, ReplayStep, replay_game
 from vantago.sgf import (
@@ -19,32 +19,37 @@ from vantago.sgf import (
     parse_sgf_bytes,
 )
 
-STATUS_OK: Literal["ok"] = "ok"
-STATUS_SKIPPED: Literal["skipped"] = "skipped"
-REASON_NON_19X19_BOARD: Literal["non_19x19_board"] = "non_19x19_board"
-REASON_HANDICAP: Literal["handicap"] = "handicap"
-REASON_SETUP_STONES: Literal["setup_stones"] = "setup_stones"
-REASON_PASS_MOVE: Literal["pass_move"] = "pass_move"
-REASON_MALFORMED_SGF: Literal["malformed_sgf"] = "malformed_sgf"
-REASON_ILLEGAL_MOVE_SEQUENCE: Literal[
-    "illegal_move_sequence"
-] = "illegal_move_sequence"
-REASON_UNSUPPORTED_SGF_FEATURE: Literal[
-    "unsupported_sgf_feature"
-] = "unsupported_sgf_feature"
+
+class ReplayDiagnosticStatus(StrEnum):
+    """Stable status values returned by replay diagnostics."""
+
+    OK = "ok"
+    SKIPPED = "skipped"
+
+
+class ReplaySkipReason(StrEnum):
+    """Stable skip reason values returned by replay diagnostics."""
+
+    NON_19X19_BOARD = "non_19x19_board"
+    HANDICAP = "handicap"
+    SETUP_STONES = "setup_stones"
+    PASS_MOVE = "pass_move"
+    MALFORMED_SGF = "malformed_sgf"
+    ILLEGAL_MOVE_SEQUENCE = "illegal_move_sequence"
+    UNSUPPORTED_SGF_FEATURE = "unsupported_sgf_feature"
+
+
+STATUS_OK = ReplayDiagnosticStatus.OK
+STATUS_SKIPPED = ReplayDiagnosticStatus.SKIPPED
+REASON_NON_19X19_BOARD = ReplaySkipReason.NON_19X19_BOARD
+REASON_HANDICAP = ReplaySkipReason.HANDICAP
+REASON_SETUP_STONES = ReplaySkipReason.SETUP_STONES
+REASON_PASS_MOVE = ReplaySkipReason.PASS_MOVE
+REASON_MALFORMED_SGF = ReplaySkipReason.MALFORMED_SGF
+REASON_ILLEGAL_MOVE_SEQUENCE = ReplaySkipReason.ILLEGAL_MOVE_SEQUENCE
+REASON_UNSUPPORTED_SGF_FEATURE = ReplaySkipReason.UNSUPPORTED_SGF_FEATURE
 SUPPORTED_BOARD_SIZE = 19
 SUPPORTED_POINT_COUNT = SUPPORTED_BOARD_SIZE * SUPPORTED_BOARD_SIZE
-
-ReplayDiagnosticStatus = Literal["ok", "skipped"]
-ReplaySkipReason = Literal[
-    "non_19x19_board",
-    "handicap",
-    "setup_stones",
-    "pass_move",
-    "malformed_sgf",
-    "illegal_move_sequence",
-    "unsupported_sgf_feature",
-]
 
 
 @dataclass(frozen=True, slots=True)
