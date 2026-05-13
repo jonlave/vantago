@@ -2,6 +2,7 @@
 
 from vantago.replay.diagnostics import (
     SUPPORTED_BOARD_SIZE,
+    SUPPORTED_POINT_COUNT,
     ReplayDiagnostic,
     ReplayDiagnosticStatus,
     ReplaySkipReason,
@@ -24,6 +25,7 @@ __all__ = [
     "ReplaySkipReason",
     "ReplayStep",
     "SUPPORTED_BOARD_SIZE",
+    "SUPPORTED_POINT_COUNT",
     "diagnose_parsed_game_replay",
     "diagnose_sgf_replay_bytes",
     "diagnose_sgf_replay_file",
