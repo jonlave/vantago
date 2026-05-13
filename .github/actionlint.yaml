@@ -1,0 +1,8 @@
+self-hosted-runner:
+  labels:
+    - home-lab
+    - ci
+
+config-variables: null
+
+paths:
