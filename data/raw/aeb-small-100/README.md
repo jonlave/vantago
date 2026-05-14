@@ -2,6 +2,9 @@
 
 This directory contains 100 unmodified SGF files selected from Andries
 Brouwer's Database of Go Games for the story #9 replay-batch milestone.
+The SGFs are stored under stable local names in `sgf/` so the repository
+does not expose the source archive's abbreviated tournament paths as the
+primary browsing experience.
 
 Source page: https://homepages.cwi.nl/~aeb/go/games/index.html
 Archive URL: https://homepages.cwi.nl/~aeb/go/games/games.tgz
@@ -17,11 +20,13 @@ games may be used freely.
 Selection rule: sort every `.sgf` member in `games.tgz` lexicographically
 by archive path, then keep the first 100 files that replay with status
 `ok` under VantaGo diagnostics. The SGF bytes are copied as-is from
-the archive; no normalization or rewriting is applied.
+the archive; no normalization or rewriting is applied. The local filenames
+are flattened to `aeb-small-0001.sgf` through `aeb-small-0100.sgf`.
 
-See `MANIFEST.txt` for selected paths, move counts, byte counts, per-file
-SHA-256 hashes, and skip reasons encountered before the 100 accepted files
-were found.
+See `MANIFEST.txt` for local IDs, local filenames, original archive paths,
+event names, rounds, players, results, dates, move counts, byte counts,
+per-file SHA-256 hashes, and skip reasons encountered before the 100
+accepted files were found.
 
 Verification command:
 

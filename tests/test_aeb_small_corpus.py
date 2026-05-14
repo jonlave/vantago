@@ -8,7 +8,26 @@ from vantago.sgf import BoardPoint
 CORPUS_DIR = Path(__file__).resolve().parents[1] / "data" / "raw" / "aeb-small-100"
 AEB_SMALL_CORPUS_FILE_COUNT = 100
 AEB_SMALL_CORPUS_MOVE_COUNT = 20_065
-AEB_CAPTURE_SPOT_CHECK = CORPUS_DIR / "games" / "AJ1st" / "01" / "1.sgf"
+AEB_CAPTURE_SPOT_CHECK = CORPUS_DIR / "sgf" / "aeb-small-0001.sgf"
+
+
+def test_aeb_small_corpus_uses_flat_local_file_names() -> None:
+    sgf_files = sorted(
+        path.relative_to(CORPUS_DIR).as_posix()
+        for path in (CORPUS_DIR / "sgf").glob("*.sgf")
+    )
+
+    assert not (CORPUS_DIR / "games").exists()
+    assert len(sgf_files) == AEB_SMALL_CORPUS_FILE_COUNT
+    assert sgf_files[0] == "sgf/aeb-small-0001.sgf"
+    assert sgf_files[-1] == "sgf/aeb-small-0100.sgf"
+
+    manifest = (CORPUS_DIR / "MANIFEST.txt").read_text(encoding="utf-8")
+    assert "id\tfile\tsource_path\tevent\tround" in manifest
+    assert (
+        "aeb-small-0001\tsgf/aeb-small-0001.sgf\tgames/AJ1st/01/1.sgf"
+        in manifest
+    )
 
 
 def test_aeb_small_corpus_replays_100_valid_games() -> None:
