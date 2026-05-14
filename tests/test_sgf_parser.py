@@ -63,11 +63,13 @@ def test_non_go_game_type_is_rejected_explicitly() -> None:
         parse_sgf_bytes(sgf, source_name="chess.sgf")
 
 
-def test_missing_game_type_is_rejected_explicitly() -> None:
-    sgf = b"(;FF[4]SZ[19];B[aa])"
+def test_missing_game_type_uses_sgf_go_default() -> None:
+    sgf = b"(;FF[4];B[aa])"
 
-    with pytest.raises(SgfParseError, match=r"expected GM\[1\]"):
-        parse_sgf_bytes(sgf, source_name="missing-gm.sgf")
+    game = parse_sgf_bytes(sgf, source_name="missing-gm.sgf")
+
+    assert game.metadata.board_size == 19
+    assert game.moves == (ParsedMove(color="b", point=BoardPoint(row=0, col=0)),)
 
 
 def test_move_node_with_both_colors_is_rejected_explicitly() -> None:

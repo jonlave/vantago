@@ -167,6 +167,9 @@ def _get_root_property(game: Any, property_name: str) -> str | None:
 
 def _validate_game_type(game: Any, source_name: str) -> None:
     game_type = _get_root_property(game, "GM")
+    if game_type is None:
+        # SGF's default game type is Go; many public Go corpora omit GM[1].
+        return
     if game_type != "1":
         msg = f"{source_name}: unsupported SGF game type {game_type!r}; expected GM[1]"
         raise UnsupportedSgfFeatureError(msg)
