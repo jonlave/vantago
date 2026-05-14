@@ -49,6 +49,15 @@ class BoardState:
 
         return self.stones[self._index(point)]
 
+    def is_legal_point(self, color: StoneColor, point: BoardPoint) -> bool:
+        """Return whether a non-pass move is legal under the replay rules."""
+
+        try:
+            self.apply_move(ParsedMove(color=color, point=point))
+        except IllegalMoveError:
+            return False
+        return True
+
     def apply_move(self, move: ParsedMove) -> Self:
         """Return the board state after applying one parsed move."""
 

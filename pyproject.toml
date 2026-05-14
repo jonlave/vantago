@@ -9,6 +9,7 @@ authors = [
   { name = "jonlave" },
 ]
 dependencies = [
+  "numpy>=2.0,<3",
   "sgfmill>=1.1.1,<2",
 ]
 
