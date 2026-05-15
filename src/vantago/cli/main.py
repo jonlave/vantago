@@ -11,6 +11,7 @@ from vantago.cli.commands import inspect_dataset as inspect_dataset_command
 from vantago.cli.commands import process_dataset as process_dataset_command
 from vantago.cli.commands import replay_batch as replay_batch_command
 from vantago.cli.commands import split_dataset as split_dataset_command
+from vantago.cli.commands import train_mlp_baseline as train_mlp_baseline_command
 from vantago.cli.commands.inspect_sgf import configure_parser, inspect_sgf
 from vantago.sgf import SgfParseError
 
@@ -51,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Evaluate random legal and frequency baselines on a split.",
     )
     evaluate_baselines_command.configure_parser(evaluate_baselines_parser)
+    train_mlp_baseline_parser = subcommands.add_parser(
+        "train-mlp-baseline",
+        help="Train a flattened-board MLP baseline and report validation metrics.",
+    )
+    train_mlp_baseline_command.configure_parser(train_mlp_baseline_parser)
     return parser
 
 
@@ -71,6 +77,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_split_dataset(args)
         if args.command == "evaluate-baselines":
             return _handle_evaluate_baselines(args)
+        if args.command == "train-mlp-baseline":
+            return _handle_train_mlp_baseline(args)
         parser.error(f"unknown command: {args.command}")
     except SgfParseError as exc:
         parser.exit(status=2, message=f"error: {exc}\n")
@@ -103,6 +111,20 @@ def _handle_evaluate_baselines(args: argparse.Namespace) -> int:
         args.split,
         args.seed,
         args.mask_topk,
+    )
+
+
+def _handle_train_mlp_baseline(args: argparse.Namespace) -> int:
+    return train_mlp_baseline_command.train_mlp_baseline_command(
+        args.dataset,
+        args.splits,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        hidden_size=args.hidden_size,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        seed=args.seed,
+        mask_topk=args.mask_topk,
     )
 
 

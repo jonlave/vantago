@@ -11,6 +11,9 @@ import numpy as np
 import pytest
 
 from vantago.baselines import (
+    BASELINE_NAMES,
+    COMPARISON_BASELINE_NAMES,
+    NON_NEURAL_BASELINE_NAMES,
     BaselineEvaluationError,
     BaselineEvaluationResult,
     BaselineEvaluationRow,
@@ -41,6 +44,21 @@ def test_game_phase_for_move_number_uses_roadmap_boundaries() -> None:
 
     with pytest.raises(BaselineEvaluationError, match="positive"):
         game_phase_for_move_number(0)
+
+
+def test_baseline_name_contract_matches_non_neural_evaluator(
+    tmp_path: Path,
+) -> None:
+    dataset_path, manifest_path = _write_fixture(
+        tmp_path,
+        _records(validation_y=5, validation_legal_labels=(5,)),
+    )
+
+    result = evaluate_baselines(dataset_path, manifest_path)
+
+    assert BASELINE_NAMES == NON_NEURAL_BASELINE_NAMES
+    assert (*NON_NEURAL_BASELINE_NAMES, "mlp_flattened") == COMPARISON_BASELINE_NAMES
+    assert tuple(row.baseline for row in result.rows) == BASELINE_NAMES
 
 
 def test_random_legal_baseline_ranks_only_legal_points(tmp_path: Path) -> None:

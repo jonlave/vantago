@@ -128,6 +128,59 @@ def test_load_policy_dataloaders_iterates_stable_batches(
         assert batch["y"].shape[0] > 0, split_name
 
 
+def test_load_policy_dataloaders_can_select_splits(
+    tmp_path: Path,
+) -> None:
+    dataset_path, manifest_path = _write_dataset_and_manifest(tmp_path)
+
+    loaders = load_policy_dataloaders(
+        dataset_path,
+        manifest_path,
+        batch_size=2,
+        splits=("train", "validation"),
+        shuffle_train=False,
+    )
+
+    assert set(loaders) == {"train", "validation"}
+
+
+def test_load_policy_dataloaders_uses_explicit_train_generator(
+    tmp_path: Path,
+) -> None:
+    dataset_path, manifest_path = _write_dataset_and_manifest(tmp_path)
+    first_generator = torch.Generator()
+    first_generator.manual_seed(123)
+    second_generator = torch.Generator()
+    second_generator.manual_seed(123)
+
+    first_loaders = load_policy_dataloaders(
+        dataset_path,
+        manifest_path,
+        batch_size=4,
+        splits=("train",),
+        train_generator=first_generator,
+    )
+    torch.manual_seed(999)
+    second_loaders = load_policy_dataloaders(
+        dataset_path,
+        manifest_path,
+        batch_size=4,
+        splits=("train",),
+        train_generator=second_generator,
+    )
+
+    first_batch = next(iter(first_loaders["train"]))
+    second_batch = next(iter(second_loaders["train"]))
+    torch.testing.assert_close(first_batch["y"], second_batch["y"])
+
+
+def test_load_policy_dataloaders_rejects_empty_splits(tmp_path: Path) -> None:
+    dataset_path, manifest_path = _write_dataset_and_manifest(tmp_path)
+
+    with pytest.raises(DatasetSplitError, match="at least one split"):
+        load_policy_dataloaders(dataset_path, manifest_path, batch_size=2, splits=())
+
+
 def test_load_policy_dataset_rejects_invalid_split(
     tmp_path: Path,
 ) -> None:
