@@ -1,5 +1,16 @@
-"""Data encoding APIs for supervised Go policy records."""
+"""Data APIs for supervised Go policy records."""
 
+from vantago.data.artifacts import (
+    ProcessedDatasetArtifact,
+    ProcessedDatasetBuildResult,
+    ProcessedDatasetError,
+    ProcessedDatasetFailure,
+    ProcessedDatasetInspection,
+    ProcessedDatasetSkipCount,
+    inspect_processed_dataset,
+    load_processed_dataset,
+    write_processed_dataset,
+)
 from vantago.data.encoding import (
     BoolArray,
     Float32Array,
@@ -15,6 +26,12 @@ from vantago.data.encoding import (
 __all__ = [
     "BoolArray",
     "Float32Array",
+    "ProcessedDatasetArtifact",
+    "ProcessedDatasetBuildResult",
+    "ProcessedDatasetError",
+    "ProcessedDatasetFailure",
+    "ProcessedDatasetInspection",
+    "ProcessedDatasetSkipCount",
     "PositionEncodingError",
     "PositionRecord",
     "decode_label",
@@ -22,4 +39,7 @@ __all__ = [
     "encode_label",
     "encode_legal_mask",
     "encode_replay_steps",
+    "inspect_processed_dataset",
+    "load_processed_dataset",
+    "write_processed_dataset",
 ]
