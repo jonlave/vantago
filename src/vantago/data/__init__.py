@@ -22,9 +22,19 @@ from vantago.data.encoding import (
     encode_legal_mask,
     encode_replay_steps,
 )
+from vantago.data.splits import (
+    DatasetSplitBuildResult,
+    DatasetSplitError,
+    DatasetSplitManifest,
+    load_dataset_split_manifest,
+    write_dataset_split_manifest,
+)
 
 __all__ = [
     "BoolArray",
+    "DatasetSplitBuildResult",
+    "DatasetSplitError",
+    "DatasetSplitManifest",
     "Float32Array",
     "ProcessedDatasetArtifact",
     "ProcessedDatasetBuildResult",
@@ -40,6 +50,8 @@ __all__ = [
     "encode_legal_mask",
     "encode_replay_steps",
     "inspect_processed_dataset",
+    "load_dataset_split_manifest",
     "load_processed_dataset",
+    "write_dataset_split_manifest",
     "write_processed_dataset",
 ]
