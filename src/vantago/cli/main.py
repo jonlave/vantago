@@ -9,6 +9,7 @@ from typing import NoReturn
 from vantago.cli.commands import inspect_dataset as inspect_dataset_command
 from vantago.cli.commands import process_dataset as process_dataset_command
 from vantago.cli.commands import replay_batch as replay_batch_command
+from vantago.cli.commands import split_dataset as split_dataset_command
 from vantago.cli.commands.inspect_sgf import configure_parser, inspect_sgf
 from vantago.sgf import SgfParseError
 
@@ -39,6 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Inspect one record from a processed dataset artifact.",
     )
     inspect_dataset_command.configure_parser(inspect_dataset_parser)
+    split_dataset_parser = subcommands.add_parser(
+        "split-dataset",
+        help="Write a deterministic game-level train/validation/test manifest.",
+    )
+    split_dataset_command.configure_parser(split_dataset_parser)
     return parser
 
 
@@ -55,6 +61,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_process_dataset(args)
         if args.command == "inspect-dataset":
             return _handle_inspect_dataset(args)
+        if args.command == "split-dataset":
+            return _handle_split_dataset(args)
         parser.error(f"unknown command: {args.command}")
     except SgfParseError as exc:
         parser.exit(status=2, message=f"error: {exc}\n")
@@ -74,6 +82,10 @@ def _handle_process_dataset(args: argparse.Namespace) -> int:
 
 def _handle_inspect_dataset(args: argparse.Namespace) -> int:
     return inspect_dataset_command.inspect_dataset(args.path, args.index)
+
+
+def _handle_split_dataset(args: argparse.Namespace) -> int:
+    return split_dataset_command.split_dataset(args.dataset, args.output, args.seed)
 
 
 def _main() -> NoReturn:
