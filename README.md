@@ -65,3 +65,10 @@ on a split:
 ```bash
 uv run vantago evaluate-baselines data/processed/aeb-small-100.npz data/processed/aeb-small-100-splits.json --split validation --seed 0
 ```
+
+Train a flattened-board MLP baseline and print validation metrics beside the
+non-neural baselines:
+
+```bash
+uv run vantago train-mlp-baseline data/processed/aeb-small-100.npz data/processed/aeb-small-100-splits.json --epochs 5 --seed 0
+```

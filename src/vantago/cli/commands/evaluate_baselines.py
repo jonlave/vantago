@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,6 +70,10 @@ def evaluate_baselines_command(
 
 
 def format_baseline_evaluation_result(result: BaselineEvaluationResult) -> str:
+    return format_baseline_rows(result.rows)
+
+
+def format_baseline_rows(rows: Sequence[BaselineEvaluationRow]) -> str:
     headers = (
         "baseline",
         "examples",
@@ -78,13 +83,17 @@ def format_baseline_evaluation_result(result: BaselineEvaluationResult) -> str:
         "cross_entropy",
         "illegal_move_rate",
     )
-    rows = [_row_values(row) for row in result.rows]
+    if not rows:
+        msg = "at least one baseline row is required"
+        raise ValueError(msg)
+
+    row_values = [_row_values(row) for row in rows]
     widths = [
-        max(len(headers[index]), *(len(row[index]) for row in rows))
+        max(len(headers[index]), *(len(row[index]) for row in row_values))
         for index in range(len(headers))
     ]
     lines = [_format_table_row(headers, widths)]
-    lines.extend(_format_table_row(row, widths) for row in rows)
+    lines.extend(_format_table_row(row, widths) for row in row_values)
     return "\n".join(lines) + "\n"
 
 

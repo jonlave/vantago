@@ -23,17 +23,28 @@ from vantago.evaluation import (
 )
 
 GamePhase: TypeAlias = Literal["opening", "middle_game", "endgame"]
-BaselineName: TypeAlias = Literal[
+NonNeuralBaselineName: TypeAlias = Literal[
     "random_legal",
     "frequency_overall",
     "frequency_by_phase",
 ]
-
-PHASE_NAMES: tuple[GamePhase, ...] = ("opening", "middle_game", "endgame")
-BASELINE_NAMES: tuple[BaselineName, ...] = (
+BaselineName: TypeAlias = Literal[
     "random_legal",
     "frequency_overall",
     "frequency_by_phase",
+    "mlp_flattened",
+]
+
+PHASE_NAMES: tuple[GamePhase, ...] = ("opening", "middle_game", "endgame")
+NON_NEURAL_BASELINE_NAMES: tuple[NonNeuralBaselineName, ...] = (
+    "random_legal",
+    "frequency_overall",
+    "frequency_by_phase",
+)
+BASELINE_NAMES: tuple[NonNeuralBaselineName, ...] = NON_NEURAL_BASELINE_NAMES
+COMPARISON_BASELINE_NAMES: tuple[BaselineName, ...] = (
+    *NON_NEURAL_BASELINE_NAMES,
+    "mlp_flattened",
 )
 DEFAULT_EVALUATION_BATCH_SIZE = 4096
 
@@ -308,7 +319,7 @@ def _update_metric_accumulator(
 
 
 def _baseline_row(
-    baseline: BaselineName,
+    baseline: NonNeuralBaselineName,
     split: str,
     accumulator: PolicyMetricAccumulator,
 ) -> BaselineEvaluationRow:

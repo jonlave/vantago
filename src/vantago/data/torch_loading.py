@@ -200,13 +200,18 @@ def load_policy_dataloaders(
     manifest_path: Path,
     batch_size: int,
     *,
+    splits: Sequence[str] = SPLIT_NAMES,
     shuffle_train: bool = True,
+    train_generator: torch.Generator | None = None,
     num_workers: int = 0,
     pin_memory: bool = False,
     drop_last: bool = False,
 ) -> dict[str, DataLoader[PolicyBatch]]:
-    """Load train, validation, and test DataLoaders from a split manifest."""
+    """Load requested train/validation/test DataLoaders from a split manifest."""
 
+    if not splits:
+        msg = "at least one split is required"
+        raise DatasetSplitError(msg)
     if batch_size < 1:
         msg = f"batch_size must be positive, got {batch_size}"
         raise ValueError(msg)
@@ -215,31 +220,18 @@ def load_policy_dataloaders(
         raise ValueError(msg)
 
     artifact, manifest = _load_dataset_and_manifest(dataset_path, manifest_path)
+    split_names = tuple(dict.fromkeys(_validate_split_name(split) for split in splits))
     return {
-        "train": _build_policy_dataloader(
-            _build_policy_dataset(artifact, manifest, "train"),
+        split: _build_policy_dataloader(
+            _build_policy_dataset(artifact, manifest, split),
             batch_size=batch_size,
-            shuffle=shuffle_train,
+            shuffle=shuffle_train if split == "train" else False,
+            generator=train_generator if split == "train" else None,
             num_workers=num_workers,
             pin_memory=pin_memory,
             drop_last=drop_last,
-        ),
-        "validation": _build_policy_dataloader(
-            _build_policy_dataset(artifact, manifest, "validation"),
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-            drop_last=drop_last,
-        ),
-        "test": _build_policy_dataloader(
-            _build_policy_dataset(artifact, manifest, "test"),
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-            drop_last=drop_last,
-        ),
+        )
+        for split in split_names
     }
 
 
@@ -440,6 +432,7 @@ def _build_policy_dataloader(
     *,
     batch_size: int,
     shuffle: bool,
+    generator: torch.Generator | None,
     num_workers: int,
     pin_memory: bool,
     drop_last: bool,
@@ -451,6 +444,7 @@ def _build_policy_dataloader(
         num_workers=num_workers,
         pin_memory=pin_memory,
         drop_last=drop_last,
+        generator=generator,
         collate_fn=_collate_policy_batch,
     )
     return cast(DataLoader[PolicyBatch], dataloader)
