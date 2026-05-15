@@ -9,9 +9,11 @@ from vantago.data.artifacts import (
     ProcessedDatasetError,
     ProcessedDatasetFailure,
     ProcessedDatasetInspection,
+    ProcessedDatasetMetadataArtifact,
     ProcessedDatasetSkipCount,
     inspect_processed_dataset,
     load_processed_dataset,
+    load_processed_dataset_metadata,
     write_processed_dataset,
 )
 from vantago.data.encoding import (
@@ -37,18 +39,26 @@ if TYPE_CHECKING:
     from vantago.data.torch_loading import (
         PolicyBatch,
         PolicyDatasetItem,
+        PolicyMetadataBatch,
         ProcessedPolicyDataset,
+        ProcessedPolicyMetadataDataset,
         load_policy_dataloaders,
         load_policy_dataset,
+        load_policy_datasets,
+        load_policy_metadata_datasets,
     )
 
 _TORCH_LOADING_EXPORTS = frozenset(
     {
         "PolicyBatch",
         "PolicyDatasetItem",
+        "PolicyMetadataBatch",
         "ProcessedPolicyDataset",
+        "ProcessedPolicyMetadataDataset",
         "load_policy_dataloaders",
         "load_policy_dataset",
+        "load_policy_datasets",
+        "load_policy_metadata_datasets",
     }
 )
 
@@ -63,12 +73,15 @@ __all__ = [
     "ProcessedDatasetError",
     "ProcessedDatasetFailure",
     "ProcessedDatasetInspection",
+    "ProcessedDatasetMetadataArtifact",
     "ProcessedDatasetSkipCount",
     "PositionEncodingError",
     "PositionRecord",
     "PolicyBatch",
     "PolicyDatasetItem",
+    "PolicyMetadataBatch",
     "ProcessedPolicyDataset",
+    "ProcessedPolicyMetadataDataset",
     "decode_label",
     "encode_board_tensor",
     "encode_label",
@@ -78,7 +91,10 @@ __all__ = [
     "load_dataset_split_manifest",
     "load_policy_dataloaders",
     "load_policy_dataset",
+    "load_policy_datasets",
+    "load_policy_metadata_datasets",
     "load_processed_dataset",
+    "load_processed_dataset_metadata",
     "write_dataset_split_manifest",
     "write_processed_dataset",
 ]

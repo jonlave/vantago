@@ -41,6 +41,12 @@ DATASET_KEYS = (
     "move_number",
     "source_name",
 )
+METADATA_DATASET_KEYS = (
+    "y",
+    "legal_mask",
+    "game_id",
+    "move_number",
+)
 
 
 class ProcessedDatasetError(ValueError):
@@ -57,6 +63,16 @@ class ProcessedDatasetArtifact:
     game_id: StringArray
     move_number: Int64Array
     source_name: StringArray
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessedDatasetMetadataArtifact:
+    """Loaded non-feature arrays from a processed dataset artifact."""
+
+    y: Int64Array
+    legal_mask: BoolArray
+    game_id: StringArray
+    move_number: Int64Array
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +232,32 @@ def load_processed_dataset(path: Path) -> ProcessedDatasetArtifact:
     return artifact
 
 
+def load_processed_dataset_metadata(path: Path) -> ProcessedDatasetMetadataArtifact:
+    """Load and validate processed dataset arrays that do not include features."""
+
+    try:
+        with np.load(path, allow_pickle=False) as loaded:
+            missing_keys = sorted(set(METADATA_DATASET_KEYS) - set(loaded.files))
+            if missing_keys:
+                msg = f"{path}: missing required arrays: {', '.join(missing_keys)}"
+                raise ProcessedDatasetError(msg)
+
+            artifact = ProcessedDatasetMetadataArtifact(
+                y=cast(Int64Array, np.asarray(loaded["y"])),
+                legal_mask=cast(BoolArray, np.asarray(loaded["legal_mask"])),
+                game_id=cast(StringArray, np.asarray(loaded["game_id"])),
+                move_number=cast(Int64Array, np.asarray(loaded["move_number"])),
+            )
+    except ProcessedDatasetError:
+        raise
+    except (OSError, ValueError) as exc:
+        msg = f"unable to load processed dataset metadata {path}: {exc}"
+        raise ProcessedDatasetError(msg) from exc
+
+    _validate_metadata_artifact(artifact)
+    return artifact
+
+
 def inspect_processed_dataset(
     path: Path,
     *,
@@ -338,6 +380,19 @@ def _validate_artifact(artifact: ProcessedDatasetArtifact) -> None:
     _validate_string_array("game_id", artifact.game_id, record_count)
     _validate_move_number(artifact.move_number, record_count)
     _validate_string_array("source_name", artifact.source_name, record_count)
+
+    row_indices = np.arange(record_count)
+    if not np.all(artifact.legal_mask[row_indices, artifact.y]):
+        msg = "legal_mask must mark every target label as legal"
+        raise ProcessedDatasetError(msg)
+
+
+def _validate_metadata_artifact(artifact: ProcessedDatasetMetadataArtifact) -> None:
+    record_count = int(artifact.y.shape[0])
+    _validate_y(artifact.y, record_count)
+    _validate_legal_mask(artifact.legal_mask, record_count)
+    _validate_string_array("game_id", artifact.game_id, record_count)
+    _validate_move_number(artifact.move_number, record_count)
 
     row_indices = np.arange(record_count)
     if not np.all(artifact.legal_mask[row_indices, artifact.y]):
