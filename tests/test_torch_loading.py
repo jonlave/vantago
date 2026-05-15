@@ -14,6 +14,8 @@ from vantago.data import (
     load_dataset_split_manifest,
     load_policy_dataloaders,
     load_policy_dataset,
+    load_policy_datasets,
+    load_policy_metadata_datasets,
     write_dataset_split_manifest,
 )
 
@@ -34,6 +36,49 @@ def test_load_policy_dataset_filters_records_by_split(
     validation_game_ids = set(manifest.splits["validation"])
     observed_game_ids = {dataset[index]["game_id"] for index in range(len(dataset))}
     assert observed_game_ids <= validation_game_ids
+
+
+def test_load_policy_datasets_loads_multiple_splits_from_one_artifact(
+    tmp_path: Path,
+) -> None:
+    dataset_path, manifest_path = _write_dataset_and_manifest(tmp_path)
+    manifest = load_dataset_split_manifest(manifest_path)
+
+    datasets = load_policy_datasets(
+        dataset_path,
+        manifest_path,
+        splits=("train", "test"),
+    )
+
+    assert set(datasets) == {"train", "test"}
+    assert len(datasets["train"]) == manifest.record_counts["train"]
+    assert len(datasets["test"]) == manifest.record_counts["test"]
+
+
+def test_load_policy_metadata_datasets_does_not_require_features(
+    tmp_path: Path,
+) -> None:
+    dataset_path = tmp_path / "metadata-only.npz"
+    manifest_path = tmp_path / "splits.json"
+    _write_metadata_artifact(
+        dataset_path,
+        {f"game-{index:02d}.sgf": 2 for index in range(10)},
+    )
+    _write_fixed_split_manifest(dataset_path, manifest_path, records_per_game=2)
+
+    datasets = load_policy_metadata_datasets(
+        dataset_path,
+        manifest_path,
+        splits=("validation",),
+    )
+    validation = datasets["validation"]
+    batch = validation.metadata_batch(0, len(validation))
+
+    assert set(datasets) == {"validation"}
+    assert batch["y"].dtype == torch.int64
+    assert batch["legal_mask"].shape[1:] == (POINT_COUNT,)
+    assert batch["legal_mask"].dtype == torch.bool
+    assert batch["move_number"].dtype == torch.int64
 
 
 def test_policy_dataset_returns_typed_training_item(
@@ -199,15 +244,7 @@ def _write_processed_artifact(
     path: Path,
     record_counts_by_game: dict[str, int],
 ) -> None:
-    game_ids: list[str] = []
-    move_numbers: list[int] = []
-    source_names: list[str] = []
-    for game_id, record_count in record_counts_by_game.items():
-        for move_number in range(1, record_count + 1):
-            game_ids.append(game_id)
-            move_numbers.append(move_number)
-            source_names.append(game_id)
-
+    game_ids, move_numbers, source_names = _metadata_lists(record_counts_by_game)
     record_count = len(game_ids)
     y = np.arange(record_count, dtype=np.int64) % POINT_COUNT
     legal_mask = np.zeros((record_count, POINT_COUNT), dtype=np.bool_)
@@ -225,6 +262,87 @@ def _write_processed_artifact(
         game_id=np.array(game_ids, dtype=np.str_),
         move_number=np.array(move_numbers, dtype=np.int64),
         source_name=np.array(source_names, dtype=np.str_),
+    )
+
+
+def _write_metadata_artifact(
+    path: Path,
+    record_counts_by_game: dict[str, int],
+) -> None:
+    game_ids, move_numbers, _ = _metadata_lists(record_counts_by_game)
+    record_count = len(game_ids)
+    y = np.arange(record_count, dtype=np.int64) % POINT_COUNT
+    legal_mask = np.zeros((record_count, POINT_COUNT), dtype=np.bool_)
+    legal_mask[np.arange(record_count), y] = True
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        path,
+        y=y,
+        legal_mask=legal_mask,
+        game_id=np.array(game_ids, dtype=np.str_),
+        move_number=np.array(move_numbers, dtype=np.int64),
+    )
+
+
+def _metadata_lists(
+    record_counts_by_game: dict[str, int],
+) -> tuple[list[str], list[int], list[str]]:
+    game_ids: list[str] = []
+    move_numbers: list[int] = []
+    source_names: list[str] = []
+    for game_id, record_count in record_counts_by_game.items():
+        for move_number in range(1, record_count + 1):
+            game_ids.append(game_id)
+            move_numbers.append(move_number)
+            source_names.append(game_id)
+    return game_ids, move_numbers, source_names
+
+
+def _write_fixed_split_manifest(
+    dataset_path: Path,
+    manifest_path: Path,
+    *,
+    records_per_game: int,
+) -> None:
+    splits = {
+        "train": tuple(f"game-{index:02d}.sgf" for index in range(8)),
+        "validation": ("game-08.sgf",),
+        "test": ("game-09.sgf",),
+    }
+    record_counts = {
+        split: len(game_ids) * records_per_game
+        for split, game_ids in splits.items()
+    }
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "dataset_path": str(dataset_path),
+                "seed": 42,
+                "ratios": {
+                    "train": 0.8,
+                    "validation": 0.1,
+                    "test": 0.1,
+                },
+                "game_counts": {
+                    "total": 10,
+                    "train": 8,
+                    "validation": 1,
+                    "test": 1,
+                },
+                "record_counts": {
+                    "total": sum(record_counts.values()),
+                    **record_counts,
+                },
+                "splits": {
+                    split: list(game_ids)
+                    for split, game_ids in splits.items()
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
 

@@ -6,6 +6,7 @@ import argparse
 from collections.abc import Sequence
 from typing import NoReturn
 
+from vantago.cli.commands import evaluate_baselines as evaluate_baselines_command
 from vantago.cli.commands import inspect_dataset as inspect_dataset_command
 from vantago.cli.commands import process_dataset as process_dataset_command
 from vantago.cli.commands import replay_batch as replay_batch_command
@@ -45,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write a deterministic game-level train/validation/test manifest.",
     )
     split_dataset_command.configure_parser(split_dataset_parser)
+    evaluate_baselines_parser = subcommands.add_parser(
+        "evaluate-baselines",
+        help="Evaluate random legal and frequency baselines on a split.",
+    )
+    evaluate_baselines_command.configure_parser(evaluate_baselines_parser)
     return parser
 
 
@@ -63,6 +69,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_inspect_dataset(args)
         if args.command == "split-dataset":
             return _handle_split_dataset(args)
+        if args.command == "evaluate-baselines":
+            return _handle_evaluate_baselines(args)
         parser.error(f"unknown command: {args.command}")
     except SgfParseError as exc:
         parser.exit(status=2, message=f"error: {exc}\n")
@@ -86,6 +94,16 @@ def _handle_inspect_dataset(args: argparse.Namespace) -> int:
 
 def _handle_split_dataset(args: argparse.Namespace) -> int:
     return split_dataset_command.split_dataset(args.dataset, args.output, args.seed)
+
+
+def _handle_evaluate_baselines(args: argparse.Namespace) -> int:
+    return evaluate_baselines_command.evaluate_baselines_command(
+        args.dataset,
+        args.splits,
+        args.split,
+        args.seed,
+        args.mask_topk,
+    )
 
 
 def _main() -> NoReturn:

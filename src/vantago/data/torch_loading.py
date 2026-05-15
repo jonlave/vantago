@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -10,7 +11,12 @@ import numpy.typing as npt
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from vantago.data.artifacts import ProcessedDatasetArtifact, load_processed_dataset
+from vantago.data.artifacts import (
+    ProcessedDatasetArtifact,
+    ProcessedDatasetMetadataArtifact,
+    load_processed_dataset,
+    load_processed_dataset_metadata,
+)
 from vantago.data.splits import (
     SPLIT_NAMES,
     DatasetSplitError,
@@ -19,6 +25,7 @@ from vantago.data.splits import (
 )
 
 Int64Array = npt.NDArray[np.int64]
+_PolicyArtifact = ProcessedDatasetArtifact | ProcessedDatasetMetadataArtifact
 
 
 class PolicyDatasetItem(TypedDict):
@@ -43,6 +50,14 @@ class PolicyBatch(TypedDict):
     source_name: list[str]
 
 
+class PolicyMetadataBatch(TypedDict):
+    """Feature-free supervised policy metadata for a contiguous dataset slice."""
+
+    y: torch.Tensor
+    legal_mask: torch.Tensor
+    move_number: torch.Tensor
+
+
 class ProcessedPolicyDataset(Dataset[PolicyDatasetItem]):
     """PyTorch Dataset view over selected rows in a processed artifact."""
 
@@ -63,6 +78,16 @@ class ProcessedPolicyDataset(Dataset[PolicyDatasetItem]):
     def __len__(self) -> int:
         return int(self._indices.shape[0])
 
+    def metadata_batch(self, start: int, stop: int) -> PolicyMetadataBatch:
+        """Return labels, legal masks, and move numbers without loading features."""
+
+        return _metadata_batch_from_artifact(
+            self._artifact,
+            self._indices,
+            start,
+            stop,
+        )
+
     def __getitem__(self, index: int) -> PolicyDatasetItem:
         if not 0 <= index < len(self):
             msg = f"dataset index must be in [0, {len(self)}), got {index}"
@@ -79,6 +104,37 @@ class ProcessedPolicyDataset(Dataset[PolicyDatasetItem]):
         }
 
 
+class ProcessedPolicyMetadataDataset:
+    """Feature-free Dataset-like view over selected processed artifact rows."""
+
+    def __init__(
+        self,
+        artifact: ProcessedDatasetMetadataArtifact,
+        indices: Int64Array,
+        *,
+        split: str,
+    ) -> None:
+        if indices.ndim != 1:
+            msg = f"indices must be one-dimensional, got {indices.shape}"
+            raise DatasetSplitError(msg)
+        self._artifact = artifact
+        self._indices = indices
+        self.split = split
+
+    def __len__(self) -> int:
+        return int(self._indices.shape[0])
+
+    def metadata_batch(self, start: int, stop: int) -> PolicyMetadataBatch:
+        """Return labels, legal masks, and move numbers for a row slice."""
+
+        return _metadata_batch_from_artifact(
+            self._artifact,
+            self._indices,
+            start,
+            stop,
+        )
+
+
 def load_policy_dataset(
     dataset_path: Path,
     manifest_path: Path,
@@ -88,6 +144,55 @@ def load_policy_dataset(
 
     artifact, manifest = _load_dataset_and_manifest(dataset_path, manifest_path)
     return _build_policy_dataset(artifact, manifest, split)
+
+
+def load_policy_datasets(
+    dataset_path: Path,
+    manifest_path: Path,
+    splits: Sequence[str] = SPLIT_NAMES,
+) -> dict[str, ProcessedPolicyDataset]:
+    """Load multiple split datasets while reading the artifact only once."""
+
+    if not splits:
+        msg = "at least one split is required"
+        raise DatasetSplitError(msg)
+
+    artifact, manifest = _load_dataset_and_manifest(dataset_path, manifest_path)
+    indices_by_split = _indices_for_splits(artifact, manifest, splits)
+    return {
+        split: ProcessedPolicyDataset(
+            artifact,
+            indices_by_split[split],
+            split=split,
+        )
+        for split in indices_by_split
+    }
+
+
+def load_policy_metadata_datasets(
+    dataset_path: Path,
+    manifest_path: Path,
+    splits: Sequence[str] = SPLIT_NAMES,
+) -> dict[str, ProcessedPolicyMetadataDataset]:
+    """Load feature-free split datasets while reading only metadata arrays."""
+
+    if not splits:
+        msg = "at least one split is required"
+        raise DatasetSplitError(msg)
+
+    artifact = load_processed_dataset_metadata(dataset_path)
+    manifest = load_dataset_split_manifest(manifest_path)
+    _validate_manifest_dataset_path(dataset_path, manifest_path, manifest)
+    _validate_manifest_game_coverage(artifact, manifest)
+    indices_by_split = _indices_for_splits(artifact, manifest, splits)
+    return {
+        split: ProcessedPolicyMetadataDataset(
+            artifact,
+            indices_by_split[split],
+            split=split,
+        )
+        for split in indices_by_split
+    }
 
 
 def load_policy_dataloaders(
@@ -190,7 +295,7 @@ def _path_has_manifest_relative_suffix(
 
 
 def _validate_manifest_game_coverage(
-    artifact: ProcessedDatasetArtifact,
+    artifact: _PolicyArtifact,
     manifest: DatasetSplitManifest,
 ) -> None:
     manifest_game_ids = {
@@ -229,6 +334,16 @@ def _build_policy_dataset(
     return ProcessedPolicyDataset(artifact, indices, split=split_name)
 
 
+def _build_policy_metadata_dataset(
+    artifact: ProcessedDatasetMetadataArtifact,
+    manifest: DatasetSplitManifest,
+    split: str,
+) -> ProcessedPolicyMetadataDataset:
+    split_name = _validate_split_name(split)
+    indices = _indices_for_split(artifact, manifest, split_name)
+    return ProcessedPolicyMetadataDataset(artifact, indices, split=split_name)
+
+
 def _validate_split_name(split: str) -> str:
     if split not in SPLIT_NAMES:
         msg = f"split must be one of {', '.join(SPLIT_NAMES)}, got {split}"
@@ -237,7 +352,7 @@ def _validate_split_name(split: str) -> str:
 
 
 def _indices_for_split(
-    artifact: ProcessedDatasetArtifact,
+    artifact: _PolicyArtifact,
     manifest: DatasetSplitManifest,
     split: str,
 ) -> Int64Array:
@@ -264,6 +379,60 @@ def _indices_for_split(
         )
         raise DatasetSplitError(msg)
     return indices
+
+
+def _indices_for_splits(
+    artifact: _PolicyArtifact,
+    manifest: DatasetSplitManifest,
+    splits: Sequence[str],
+) -> dict[str, Int64Array]:
+    split_names = tuple(dict.fromkeys(_validate_split_name(split) for split in splits))
+    split_for_game = {
+        game_id: split_name
+        for split_name in SPLIT_NAMES
+        for game_id in manifest.splits[split_name]
+    }
+    selected: dict[str, list[int]] = {split_name: [] for split_name in split_names}
+    for row_index, game_id in enumerate(artifact.game_id):
+        split_name = split_for_game[str(game_id)]
+        if split_name in selected:
+            selected[split_name].append(row_index)
+
+    indices_by_split = {
+        split_name: np.array(row_indices, dtype=np.int64)
+        for split_name, row_indices in selected.items()
+    }
+    for split_name, indices in indices_by_split.items():
+        expected_count = manifest.record_counts[split_name]
+        actual_count = int(indices.shape[0])
+        if actual_count != expected_count:
+            msg = (
+                f"{split_name} split expected {expected_count} records from "
+                f"manifest, found {actual_count} in dataset"
+            )
+            raise DatasetSplitError(msg)
+    return indices_by_split
+
+
+def _metadata_batch_from_artifact(
+    artifact: _PolicyArtifact,
+    indices: Int64Array,
+    start: int,
+    stop: int,
+) -> PolicyMetadataBatch:
+    _validate_batch_slice(start, stop, int(indices.shape[0]))
+    row_indices = indices[start:stop]
+    return {
+        "y": torch.from_numpy(artifact.y[row_indices]),
+        "legal_mask": torch.from_numpy(artifact.legal_mask[row_indices]),
+        "move_number": torch.from_numpy(artifact.move_number[row_indices]),
+    }
+
+
+def _validate_batch_slice(start: int, stop: int, length: int) -> None:
+    if not 0 <= start <= stop <= length:
+        msg = f"batch slice must satisfy 0 <= start <= stop <= {length}"
+        raise IndexError(msg)
 
 
 def _build_policy_dataloader(

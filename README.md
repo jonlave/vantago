@@ -58,3 +58,10 @@ test.
 Internal board coordinates are 0-based top-left row/column coordinates. For
 example, SGF `aa` is `row=0 col=0`, and flat labels use
 `row * board_size + col`.
+
+Evaluate random legal, overall frequency, and phase-aware frequency baselines
+on a split:
+
+```bash
+uv run vantago evaluate-baselines data/processed/aeb-small-100.npz data/processed/aeb-small-100-splits.json --split validation --seed 0
+```
