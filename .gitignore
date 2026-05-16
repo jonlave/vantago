@@ -53,6 +53,8 @@ cover/
 
 # Generated local dataset artifacts
 data/processed/
+data/raw/.cache/
+data/raw/aeb-fetches/
 
 # Translations
 *.mo

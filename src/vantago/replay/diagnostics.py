@@ -33,6 +33,7 @@ class ReplaySkipReason(StrEnum):
     NON_19X19_BOARD = "non_19x19_board"
     HANDICAP = "handicap"
     SETUP_STONES = "setup_stones"
+    EMPTY_GAME = "empty_game"
     PASS_MOVE = "pass_move"
     MALFORMED_SGF = "malformed_sgf"
     ILLEGAL_MOVE_SEQUENCE = "illegal_move_sequence"
@@ -44,6 +45,7 @@ STATUS_SKIPPED = ReplayDiagnosticStatus.SKIPPED
 REASON_NON_19X19_BOARD = ReplaySkipReason.NON_19X19_BOARD
 REASON_HANDICAP = ReplaySkipReason.HANDICAP
 REASON_SETUP_STONES = ReplaySkipReason.SETUP_STONES
+REASON_EMPTY_GAME = ReplaySkipReason.EMPTY_GAME
 REASON_PASS_MOVE = ReplaySkipReason.PASS_MOVE
 REASON_MALFORMED_SGF = ReplaySkipReason.MALFORMED_SGF
 REASON_ILLEGAL_MOVE_SEQUENCE = ReplaySkipReason.ILLEGAL_MOVE_SEQUENCE
@@ -103,6 +105,15 @@ def diagnose_parsed_game_replay(parsed_game: ParsedGame) -> ReplayDiagnostic:
             move_count=len(parsed_game.moves),
         )
 
+    move_count = len(parsed_game.moves)
+    if move_count == 0:
+        return _skipped(
+            source_name=parsed_game.source_name,
+            reason=REASON_EMPTY_GAME,
+            message=f"{parsed_game.source_name}: skipped empty game with no moves",
+            move_count=move_count,
+        )
+
     pass_move_number = _first_pass_move_number(parsed_game)
     if pass_move_number is not None:
         return _skipped(
@@ -126,7 +137,6 @@ def diagnose_parsed_game_replay(parsed_game: ParsedGame) -> ReplayDiagnostic:
             move_count=len(parsed_game.moves),
         )
 
-    move_count = len(parsed_game.moves)
     return ReplayDiagnostic(
         status=STATUS_OK,
         reason=None,

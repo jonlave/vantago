@@ -31,6 +31,20 @@ Replay the committed 100-game public-domain SGF corpus and print diagnostics:
 uv run vantago replay-batch data/raw/aeb-small-100
 ```
 
+Fetch any number of replay-valid games on demand from Andries Brouwer's public
+domain AEB Go game archive. Generated corpora and download caches are ignored
+local artifacts:
+
+```bash
+uv run vantago fetch-aeb-games --games 1000 --seed 0 --output data/raw/aeb-fetches/aeb-1000-s0
+```
+
+Fetch, encode, and split a trainable dataset in one step:
+
+```bash
+uv run vantago prepare-aeb-dataset --games 1000 --seed 0 --name aeb-1000-s0
+```
+
 Encode replayed positions into a processed NumPy dataset artifact:
 
 ```bash

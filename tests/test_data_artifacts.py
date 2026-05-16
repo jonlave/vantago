@@ -115,6 +115,29 @@ def test_write_processed_dataset_reports_skips_while_writing_valid_records(
     assert artifact.game_id.tolist() == ["a_valid.sgf"]
 
 
+def test_write_processed_dataset_skips_empty_games(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "sgf"
+    valid_game = input_dir / "a_valid.sgf"
+    empty_game = input_dir / "b_empty.sgf"
+    _write_sgf(valid_game, _sgf(sequence=";B[aa]"))
+    _write_sgf(empty_game, _sgf(sequence=""))
+    output = tmp_path / "dataset.npz"
+
+    result = write_processed_dataset(input_dir, output)
+
+    assert result.ok == 1
+    assert result.skipped == 1
+    assert result.failed == 0
+    assert result.records_written == 1
+    assert result.skipped_by_reason == (
+        ProcessedDatasetSkipCount(reason=ReplaySkipReason.EMPTY_GAME, count=1),
+    )
+    assert result.skipped_diagnostics[0].source_name == str(empty_game)
+    assert load_processed_dataset(output).game_id.tolist() == ["a_valid.sgf"]
+
+
 def test_process_dataset_cli_prints_summary_and_writes_artifact(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

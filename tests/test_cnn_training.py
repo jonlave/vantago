@@ -72,13 +72,32 @@ def test_train_cnn_policy_smoke_writes_checkpoint_and_history(
     assert result.history[0].is_best
     assert result.best_validation_metrics == result.history[0].validation_metrics
     assert not result.model.training
+    assert result.started_at.endswith("Z")
+    assert result.finished_at.endswith("Z")
+    assert result.duration_seconds > 0.0
+    assert result.history[0].started_at is not None
+    assert result.history[0].started_at.endswith("Z")
+    assert result.history[0].finished_at is not None
+    assert result.history[0].finished_at.endswith("Z")
+    assert result.history[0].duration_seconds is not None
+    assert result.history[0].duration_seconds > 0.0
 
     history_json = json.loads(result.history_path.read_text(encoding="utf-8"))
     assert history_json["dataset_path"] == str(dataset_path)
     assert history_json["manifest_path"] == str(manifest_path)
     assert history_json["checkpoint_path"] == str(checkpoint_path)
+    assert history_json["started_at"] == result.started_at
+    assert history_json["finished_at"] == result.finished_at
+    assert history_json["duration_seconds"] == pytest.approx(
+        result.duration_seconds
+    )
     assert history_json["best_epoch"] == 1
     assert history_json["config"]["hidden_channels"] == 1
+    assert history_json["history"][0]["started_at"] == result.history[0].started_at
+    assert history_json["history"][0]["finished_at"] == result.history[0].finished_at
+    assert history_json["history"][0]["duration_seconds"] == pytest.approx(
+        result.history[0].duration_seconds
+    )
     assert history_json["history"][0]["is_best"] is True
 
 
@@ -117,6 +136,14 @@ def test_load_cnn_policy_checkpoint_rebuilds_model_for_validation(
     assert checkpoint.config.hidden_channels == 1
     assert checkpoint.best_epoch == 1
     assert checkpoint.history[0].is_best
+    assert checkpoint.started_at is not None
+    assert checkpoint.started_at.endswith("Z")
+    assert checkpoint.finished_at is not None
+    assert checkpoint.finished_at.endswith("Z")
+    assert checkpoint.duration_seconds is not None
+    assert checkpoint.duration_seconds > 0.0
+    assert checkpoint.history[0].duration_seconds is not None
+    assert checkpoint.history[0].duration_seconds > 0.0
     assert metrics.example_count == 1
     assert metrics.cross_entropy is not None
 
@@ -383,6 +410,11 @@ def test_train_cnn_policy_persists_best_checkpoint_before_later_failure(
     assert checkpoint.best_epoch == 1
     assert len(checkpoint.history) == 1
     assert checkpoint.history[0].is_best
+    assert checkpoint.started_at is not None
+    assert checkpoint.started_at.endswith("Z")
+    assert checkpoint.finished_at is None
+    assert checkpoint.duration_seconds is None
+    assert checkpoint.history[0].duration_seconds is not None
 
 
 def test_train_cnn_policy_is_repeatable_with_same_seed(tmp_path: Path) -> None:

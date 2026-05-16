@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import time
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -63,6 +65,9 @@ class CnnEpochResult:
     train_loss: float
     validation_metrics: PolicyMetricSummary
     is_best: bool
+    started_at: str | None = None
+    finished_at: str | None = None
+    duration_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +83,9 @@ class CnnTrainingResult:
     best_validation_metrics: PolicyMetricSummary
     checkpoint_path: Path
     history_path: Path
+    started_at: str
+    finished_at: str
+    duration_seconds: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +102,9 @@ class CnnPolicyCheckpoint:
     history: tuple[CnnEpochResult, ...]
     best_epoch: int
     best_validation_metrics: PolicyMetricSummary
+    started_at: str | None
+    finished_at: str | None
+    duration_seconds: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,14 +166,20 @@ def train_cnn_policy(
     best_epoch = 0
     best_state: dict[str, torch.Tensor] | None = None
     best_optimizer_state: object | None = None
+    training_started_at = _utc_now()
+    training_started_monotonic = time.perf_counter()
 
     for epoch in range(1, config.epochs + 1):
+        epoch_started_at = _utc_now()
+        epoch_started_monotonic = time.perf_counter()
         train_loss = _train_one_epoch(model, train_loader, optimizer)
         validation_metrics = evaluate_cnn_policy(
             model,
             validation_loader,
             mask_topk=config.mask_topk,
         )
+        epoch_finished_at = _utc_now()
+        epoch_duration_seconds = time.perf_counter() - epoch_started_monotonic
         is_best = _is_best_validation(validation_metrics, best_metrics)
         if is_best:
             best_metrics = validation_metrics
@@ -175,6 +192,9 @@ def train_cnn_policy(
                 train_loss=train_loss,
                 validation_metrics=validation_metrics,
                 is_best=is_best,
+                started_at=epoch_started_at,
+                finished_at=epoch_finished_at,
+                duration_seconds=epoch_duration_seconds,
             )
         )
         if is_best:
@@ -188,6 +208,9 @@ def train_cnn_policy(
                 config=config,
                 history=_mark_best_epoch(tuple(history), best_epoch),
                 best_epoch=best_epoch,
+                started_at=training_started_at,
+                finished_at=None,
+                duration_seconds=None,
                 model_state_dict=best_state,
                 optimizer_state_dict=best_optimizer_state,
             )
@@ -200,6 +223,8 @@ def train_cnn_policy(
     best_model.load_state_dict(best_state)
     best_model.eval()
     resolved_history = _mark_best_epoch(tuple(history), best_epoch)
+    training_finished_at = _utc_now()
+    training_duration_seconds = time.perf_counter() - training_started_monotonic
     _write_checkpoint(
         config.checkpoint_path,
         dataset_path=dataset_path,
@@ -207,6 +232,9 @@ def train_cnn_policy(
         config=config,
         history=resolved_history,
         best_epoch=best_epoch,
+        started_at=training_started_at,
+        finished_at=training_finished_at,
+        duration_seconds=training_duration_seconds,
         model_state_dict=best_state,
         optimizer_state_dict=best_optimizer_state,
     )
@@ -218,6 +246,9 @@ def train_cnn_policy(
         config=config,
         history=resolved_history,
         best_epoch=best_epoch,
+        started_at=training_started_at,
+        finished_at=training_finished_at,
+        duration_seconds=training_duration_seconds,
     )
 
     return CnnTrainingResult(
@@ -230,6 +261,9 @@ def train_cnn_policy(
         best_validation_metrics=best_metrics,
         checkpoint_path=config.checkpoint_path,
         history_path=history_path,
+        started_at=training_started_at,
+        finished_at=training_finished_at,
+        duration_seconds=training_duration_seconds,
     )
 
 
@@ -264,6 +298,9 @@ def load_cnn_policy_checkpoint(path: Path) -> CnnPolicyCheckpoint:
     best_metrics = _metric_summary_from_json_mapping(
         _require_child_mapping(mapping, "best_validation_metrics")
     )
+    started_at = _optional_string(mapping, "started_at")
+    finished_at = _optional_string(mapping, "finished_at")
+    duration_seconds = _optional_float(mapping, "duration_seconds")
     dataset_path = Path(_require_string(mapping, "dataset_path"))
     manifest_path = Path(_require_string(mapping, "manifest_path"))
     model = CnnPolicyNetwork(hidden_channels=config.hidden_channels)
@@ -285,6 +322,9 @@ def load_cnn_policy_checkpoint(path: Path) -> CnnPolicyCheckpoint:
         history=history,
         best_epoch=best_epoch,
         best_validation_metrics=best_metrics,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_seconds=duration_seconds,
     )
 
 
@@ -618,6 +658,9 @@ def _mark_best_epoch(
             train_loss=epoch.train_loss,
             validation_metrics=epoch.validation_metrics,
             is_best=epoch.epoch == best_epoch,
+            started_at=epoch.started_at,
+            finished_at=epoch.finished_at,
+            duration_seconds=epoch.duration_seconds,
         )
         for epoch in history
     )
@@ -635,6 +678,9 @@ def _write_checkpoint(
     config: CnnTrainingConfig,
     history: tuple[CnnEpochResult, ...],
     best_epoch: int,
+    started_at: str,
+    finished_at: str | None,
+    duration_seconds: float | None,
     model_state_dict: dict[str, torch.Tensor],
     optimizer_state_dict: object,
 ) -> None:
@@ -644,6 +690,9 @@ def _write_checkpoint(
         "dataset_path": str(dataset_path),
         "manifest_path": str(manifest_path),
         "config": _config_to_json_data(config),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_seconds": duration_seconds,
         "best_epoch": best_epoch,
         "best_validation_metrics": _metric_summary_to_json_data(
             history[best_epoch - 1].validation_metrics
@@ -669,11 +718,17 @@ def _write_history(
     config: CnnTrainingConfig,
     history: tuple[CnnEpochResult, ...],
     best_epoch: int,
+    started_at: str,
+    finished_at: str,
+    duration_seconds: float,
 ) -> None:
     data = {
         "dataset_path": str(dataset_path),
         "manifest_path": str(manifest_path),
         "checkpoint_path": str(checkpoint_path),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_seconds": duration_seconds,
         "best_epoch": best_epoch,
         "config": _config_to_json_data(config),
         "history": [_epoch_to_json_data(epoch) for epoch in history],
@@ -705,6 +760,9 @@ def _config_to_json_data(config: CnnTrainingConfig) -> dict[str, object]:
 def _epoch_to_json_data(epoch: CnnEpochResult) -> dict[str, object]:
     return {
         "epoch": epoch.epoch,
+        "started_at": epoch.started_at,
+        "finished_at": epoch.finished_at,
+        "duration_seconds": epoch.duration_seconds,
         "train_loss": epoch.train_loss,
         "validation_metrics": _metric_summary_to_json_data(
             epoch.validation_metrics
@@ -753,6 +811,9 @@ def _epoch_from_json_mapping(item: object) -> CnnEpochResult:
             _require_child_mapping(mapping, "validation_metrics")
         ),
         is_best=_require_bool(mapping, "is_best"),
+        started_at=_optional_string(mapping, "started_at"),
+        finished_at=_optional_string(mapping, "finished_at"),
+        duration_seconds=_optional_float(mapping, "duration_seconds"),
     )
 
 
@@ -823,12 +884,36 @@ def _require_float(mapping: dict[str, object], key: str) -> float:
     return float(value)
 
 
+def _optional_string(mapping: dict[str, object], key: str) -> str | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        msg = f"{key} must be a string or null"
+        raise CnnTrainingError(msg)
+    return value
+
+
+def _optional_float(mapping: dict[str, object], key: str) -> float | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        msg = f"{key} must be numeric or null"
+        raise CnnTrainingError(msg)
+    return float(value)
+
+
 def _require_bool(mapping: dict[str, object], key: str) -> bool:
     value = mapping.get(key)
     if not isinstance(value, bool):
         msg = f"{key} must be a boolean"
         raise CnnTrainingError(msg)
     return value
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _model_device(model: nn.Module) -> torch.device:
