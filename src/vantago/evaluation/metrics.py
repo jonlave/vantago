@@ -48,6 +48,12 @@ class PolicyMetricAccumulator:
         self._cross_entropy_count = 0
         self._has_cross_entropy: bool | None = None
 
+    @property
+    def example_count(self) -> int:
+        """Number of examples accumulated so far."""
+
+        return self._example_count
+
     def update(
         self,
         scores: torch.Tensor,

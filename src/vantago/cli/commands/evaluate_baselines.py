@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING
 from vantago.data.splits import SPLIT_NAMES
 
 if TYPE_CHECKING:
-    from vantago.baselines import BaselineEvaluationResult, BaselineEvaluationRow
+    from vantago.baselines import (
+        BaselineEvaluationResult,
+        BaselineEvaluationRow,
+        BaselinePhaseEvaluationRow,
+    )
 
 
 def configure_parser(parser: argparse.ArgumentParser) -> None:
@@ -70,7 +74,11 @@ def evaluate_baselines_command(
 
 
 def format_baseline_evaluation_result(result: BaselineEvaluationResult) -> str:
-    return format_baseline_rows(result.rows)
+    return (
+        format_baseline_rows(result.rows)
+        + "\n"
+        + format_baseline_phase_rows(result.phase_rows)
+    )
 
 
 def format_baseline_rows(rows: Sequence[BaselineEvaluationRow]) -> str:
@@ -97,10 +105,65 @@ def format_baseline_rows(rows: Sequence[BaselineEvaluationRow]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def format_baseline_phase_rows(rows: Sequence[BaselinePhaseEvaluationRow]) -> str:
+    headers = (
+        "baseline",
+        "phase",
+        "examples",
+        "top_1",
+        "top_3",
+        "top_5",
+        "cross_entropy",
+        "illegal_move_rate",
+    )
+    if not rows:
+        msg = "at least one baseline phase row is required"
+        raise ValueError(msg)
+
+    row_values = [_phase_row_values(row) for row in rows]
+    widths = [
+        max(len(headers[index]), *(len(row[index]) for row in row_values))
+        for index in range(len(headers))
+    ]
+    lines = [_format_table_row(headers, widths)]
+    lines.extend(_format_table_row(row, widths) for row in row_values)
+    return "\n".join(lines) + "\n"
+
+
 def _row_values(row: BaselineEvaluationRow) -> tuple[str, ...]:
     metrics = row.metrics
     return (
         row.baseline,
+        str(metrics.example_count),
+        _format_metric(metrics.top_1),
+        _format_metric(metrics.top_3),
+        _format_metric(metrics.top_5),
+        (
+            "n/a"
+            if metrics.cross_entropy is None
+            else _format_metric(metrics.cross_entropy)
+        ),
+        _format_metric(metrics.illegal_move_rate),
+    )
+
+
+def _phase_row_values(row: BaselinePhaseEvaluationRow) -> tuple[str, ...]:
+    metrics = row.metrics
+    if metrics is None:
+        return (
+            row.baseline,
+            row.phase,
+            "0",
+            "n/a",
+            "n/a",
+            "n/a",
+            "n/a",
+            "n/a",
+        )
+
+    return (
+        row.baseline,
+        row.phase,
         str(metrics.example_count),
         _format_metric(metrics.top_1),
         _format_metric(metrics.top_3),
