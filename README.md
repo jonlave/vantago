@@ -72,3 +72,13 @@ non-neural baselines:
 ```bash
 uv run vantago train-mlp-baseline data/processed/aeb-small-100.npz data/processed/aeb-small-100-splits.json --epochs 5 --seed 0
 ```
+
+Run the first validation comparison across random, frequency, MLP, and CNN
+policy models:
+
+```bash
+uv run vantago compare-policy-models data/processed/aeb-small-100.npz data/processed/aeb-small-100-splits.json --checkpoint-out data/processed/runs/aeb-small-100/cnn.pt --epochs 5 --seed 0 --mask-topk
+```
+
+The comparison command records MLP epoch history and CNN best-checkpoint history
+as ignored JSON artifacts under `data/processed/`.
