@@ -84,6 +84,20 @@ def test_non_19x19_board_is_skipped_with_reason() -> None:
     )
 
 
+def test_empty_game_is_skipped_with_reason() -> None:
+    diagnostic = diagnose_sgf_replay_bytes(
+        _sgf_bytes(sequence=""),
+        source_name="empty.sgf",
+    )
+
+    _assert_skipped(
+        diagnostic,
+        reason=ReplaySkipReason.EMPTY_GAME,
+        move_count=PARSE_SKIP_MOVE_COUNT,
+        message_fragment="empty game",
+    )
+
+
 def test_handicap_game_is_skipped_with_reason() -> None:
     diagnostic = diagnose_sgf_replay_bytes(
         _sgf_bytes(
@@ -197,4 +211,3 @@ def test_pass_move_is_skipped_with_reason() -> None:
         move_count=TWO_MOVE_COUNT,
         message_fragment=f"{SUPPORTED_POINT_COUNT}-point target space",
     )
-

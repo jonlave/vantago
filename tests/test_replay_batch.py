@@ -37,18 +37,19 @@ def test_find_sgf_files_returns_recursive_paths_in_stable_order(
 def test_replay_sgf_batch_aggregates_ok_skips_and_moves(tmp_path: Path) -> None:
     _write_sgf(tmp_path / "a_valid.sgf", _sgf(sequence=";B[aa];W[sa]"))
     _write_sgf(tmp_path / "b_pass.sgf", _sgf(sequence=";B[aa];W[]"))
+    _write_sgf(tmp_path / "c_empty.sgf", _sgf(sequence=""))
     _write_sgf(
-        tmp_path / "c_small.sgf",
+        tmp_path / "d_small.sgf",
         _sgf(board_size=SMALL_BOARD_SIZE, sequence=";B[aa]"),
     )
-    _write_sgf(tmp_path / "d_illegal.sgf", _sgf(sequence=";B[aa];W[aa]"))
+    _write_sgf(tmp_path / "e_illegal.sgf", _sgf(sequence=";B[aa];W[aa]"))
     _write_sgf(tmp_path / "z_malformed.sgf", "not an sgf")
 
     result = replay_sgf_batch(tmp_path)
 
-    assert result.files_scanned == 5
+    assert result.files_scanned == 6
     assert result.ok == 1
-    assert result.skipped == 4
+    assert result.skipped == 5
     assert result.failed == 0
     assert result.moves_replayed == 2
     assert result.ok_games == (
@@ -56,14 +57,16 @@ def test_replay_sgf_batch_aggregates_ok_skips_and_moves(tmp_path: Path) -> None:
     )
     assert _skip_counts(result.skipped_by_reason) == {
         ReplaySkipReason.NON_19X19_BOARD: 1,
+        ReplaySkipReason.EMPTY_GAME: 1,
         ReplaySkipReason.PASS_MOVE: 1,
         ReplaySkipReason.MALFORMED_SGF: 1,
         ReplaySkipReason.ILLEGAL_MOVE_SEQUENCE: 1,
     }
     assert [diagnostic.source_name for diagnostic in result.skipped_diagnostics] == [
         str(tmp_path / "b_pass.sgf"),
-        str(tmp_path / "c_small.sgf"),
-        str(tmp_path / "d_illegal.sgf"),
+        str(tmp_path / "c_empty.sgf"),
+        str(tmp_path / "d_small.sgf"),
+        str(tmp_path / "e_illegal.sgf"),
         str(tmp_path / "z_malformed.sgf"),
     ]
 

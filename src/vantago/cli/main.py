@@ -9,7 +9,9 @@ from typing import NoReturn
 from vantago.cli.commands import compare_policy_models as compare_models_command
 from vantago.cli.commands import evaluate_baselines as evaluate_baselines_command
 from vantago.cli.commands import evaluate_cnn_policy as evaluate_cnn_policy_command
+from vantago.cli.commands import fetch_aeb_games as fetch_aeb_games_command
 from vantago.cli.commands import inspect_dataset as inspect_dataset_command
+from vantago.cli.commands import prepare_aeb_dataset as prepare_aeb_dataset_command
 from vantago.cli.commands import process_dataset as process_dataset_command
 from vantago.cli.commands import replay_batch as replay_batch_command
 from vantago.cli.commands import split_dataset as split_dataset_command
@@ -35,6 +37,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replay a file or directory of SGFs and print summary diagnostics.",
     )
     replay_batch_command.configure_parser(replay_batch_parser)
+    fetch_aeb_games_parser = subcommands.add_parser(
+        "fetch-aeb-games",
+        help="Fetch replay-valid SGFs from the AEB online Go game archive.",
+    )
+    fetch_aeb_games_command.configure_parser(fetch_aeb_games_parser)
+    prepare_aeb_dataset_parser = subcommands.add_parser(
+        "prepare-aeb-dataset",
+        help="Fetch AEB SGFs and write processed dataset/split artifacts.",
+    )
+    prepare_aeb_dataset_command.configure_parser(prepare_aeb_dataset_parser)
     process_dataset_parser = subcommands.add_parser(
         "process-dataset",
         help="Encode SGFs into a processed NumPy dataset artifact.",
@@ -87,6 +99,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_inspect_sgf(args)
         if args.command == "replay-batch":
             return _handle_replay_batch(args)
+        if args.command == "fetch-aeb-games":
+            return _handle_fetch_aeb_games(args)
+        if args.command == "prepare-aeb-dataset":
+            return _handle_prepare_aeb_dataset(args)
         if args.command == "process-dataset":
             return _handle_process_dataset(args)
         if args.command == "inspect-dataset":
@@ -114,6 +130,31 @@ def _handle_inspect_sgf(args: argparse.Namespace) -> int:
 
 def _handle_replay_batch(args: argparse.Namespace) -> int:
     return replay_batch_command.replay_batch(args.path)
+
+
+def _handle_fetch_aeb_games(args: argparse.Namespace) -> int:
+    return fetch_aeb_games_command.fetch_aeb_games_command(
+        args.games,
+        args.seed,
+        args.output,
+        args.archive_url,
+        args.cache_dir,
+        args.timeout,
+    )
+
+
+def _handle_prepare_aeb_dataset(args: argparse.Namespace) -> int:
+    return prepare_aeb_dataset_command.prepare_aeb_dataset_command(
+        args.games,
+        args.seed,
+        args.name,
+        args.archive_url,
+        args.cache_dir,
+        args.timeout,
+        args.raw_output,
+        args.dataset_output,
+        args.splits_output,
+    )
 
 
 def _handle_process_dataset(args: argparse.Namespace) -> int:
