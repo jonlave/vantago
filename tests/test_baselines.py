@@ -84,7 +84,11 @@ def test_baseline_name_contract_matches_non_neural_evaluator(
     result = evaluate_baselines(dataset_path, manifest_path)
 
     assert BASELINE_NAMES == NON_NEURAL_BASELINE_NAMES
-    assert (*NON_NEURAL_BASELINE_NAMES, "mlp_flattened") == COMPARISON_BASELINE_NAMES
+    assert (
+        *NON_NEURAL_BASELINE_NAMES,
+        "mlp_flattened",
+        "cnn_policy",
+    ) == COMPARISON_BASELINE_NAMES
     assert tuple(row.baseline for row in result.rows) == BASELINE_NAMES
 
 

@@ -13,8 +13,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from vantago.baselines.evaluation import (
+    PHASE_NAMES,
+    BaselineEvaluationError,
+    BaselineEvaluationRow,
+    BaselineName,
+    BaselinePhaseEvaluationRow,
+    GamePhase,
+    phase_mask_for_move_numbers,
+)
 from vantago.data.artifacts import ProcessedDatasetError
-from vantago.data.splits import DatasetSplitError
+from vantago.data.splits import SPLIT_NAMES, DatasetSplitError
 from vantago.data.torch_loading import PolicyBatch, load_policy_dataloaders
 from vantago.evaluation import (
     PolicyMetricAccumulator,
@@ -24,7 +33,7 @@ from vantago.evaluation import (
 from vantago.models import CnnPolicyNetwork, CnnPolicyNetworkError
 
 CHECKPOINT_FORMAT_VERSION = 1
-MODEL_KIND = "cnn_policy"
+MODEL_KIND: BaselineName = "cnn_policy"
 
 
 class CnnTrainingError(ValueError):
@@ -76,6 +85,8 @@ class CnnPolicyCheckpoint:
     """Reloaded CNN policy checkpoint."""
 
     path: Path
+    dataset_path: Path
+    manifest_path: Path
     format_version: int
     model_kind: str
     config: CnnTrainingConfig
@@ -83,6 +94,22 @@ class CnnPolicyCheckpoint:
     history: tuple[CnnEpochResult, ...]
     best_epoch: int
     best_validation_metrics: PolicyMetricSummary
+
+
+@dataclass(frozen=True, slots=True)
+class CnnPolicyEvaluationResult:
+    """Structured result for checkpoint-based CNN policy evaluation."""
+
+    dataset_path: Path
+    manifest_path: Path
+    checkpoint_path: Path
+    checkpoint_dataset_path: Path
+    checkpoint_manifest_path: Path
+    split: str
+    batch_size: int
+    mask_topk: bool
+    rows: tuple[BaselineEvaluationRow, ...]
+    phase_rows: tuple[BaselinePhaseEvaluationRow, ...]
 
 
 def train_cnn_policy(
@@ -237,6 +264,8 @@ def load_cnn_policy_checkpoint(path: Path) -> CnnPolicyCheckpoint:
     best_metrics = _metric_summary_from_json_mapping(
         _require_child_mapping(mapping, "best_validation_metrics")
     )
+    dataset_path = Path(_require_string(mapping, "dataset_path"))
+    manifest_path = Path(_require_string(mapping, "manifest_path"))
     model = CnnPolicyNetwork(hidden_channels=config.hidden_channels)
     state_dict = cast(
         dict[str, torch.Tensor],
@@ -247,6 +276,8 @@ def load_cnn_policy_checkpoint(path: Path) -> CnnPolicyCheckpoint:
 
     return CnnPolicyCheckpoint(
         path=path,
+        dataset_path=dataset_path,
+        manifest_path=manifest_path,
         format_version=format_version,
         model_kind=model_kind,
         config=config,
@@ -282,11 +313,151 @@ def evaluate_cnn_policy(
                     logits_for_cross_entropy=logits,
                 )
         return accumulator.summary()
-    except PolicyMetricError as exc:
+    except (BaselineEvaluationError, PolicyMetricError) as exc:
         raise CnnTrainingError(str(exc)) from exc
     finally:
         if model_was_training:
             model.train()
+
+
+def evaluate_cnn_policy_checkpoint(
+    dataset_path: Path,
+    manifest_path: Path,
+    checkpoint_path: Path,
+    *,
+    split: str = "validation",
+    batch_size: int = 128,
+    mask_topk: bool = False,
+) -> CnnPolicyEvaluationResult:
+    """Load a CNN checkpoint and evaluate it on one dataset split."""
+
+    split_name = _validate_split(split)
+    if batch_size < 1:
+        msg = f"batch_size must be positive, got {batch_size}"
+        raise CnnTrainingError(msg)
+
+    checkpoint = load_cnn_policy_checkpoint(checkpoint_path)
+    _validate_checkpoint_provenance(checkpoint, dataset_path, manifest_path)
+    try:
+        dataloaders = load_policy_dataloaders(
+            dataset_path,
+            manifest_path,
+            batch_size,
+            splits=(split_name,),
+            shuffle_train=False,
+        )
+    except (DatasetSplitError, ProcessedDatasetError, ValueError) as exc:
+        raise CnnTrainingError(str(exc)) from exc
+
+    metrics, phase_rows = _evaluate_cnn_policy_with_phase_rows(
+        checkpoint.model,
+        dataloaders[split_name],
+        split=split_name,
+        mask_topk=mask_topk,
+    )
+    return CnnPolicyEvaluationResult(
+        dataset_path=dataset_path,
+        manifest_path=manifest_path,
+        checkpoint_path=checkpoint_path,
+        checkpoint_dataset_path=checkpoint.dataset_path,
+        checkpoint_manifest_path=checkpoint.manifest_path,
+        split=split_name,
+        batch_size=batch_size,
+        mask_topk=mask_topk,
+        rows=(
+            BaselineEvaluationRow(
+                baseline=MODEL_KIND,
+                split=split_name,
+                metrics=metrics,
+            ),
+        ),
+        phase_rows=phase_rows,
+    )
+
+
+def _evaluate_cnn_policy_with_phase_rows(
+    model: nn.Module,
+    dataloader: DataLoader[PolicyBatch],
+    *,
+    split: str,
+    mask_topk: bool,
+) -> tuple[PolicyMetricSummary, tuple[BaselinePhaseEvaluationRow, ...]]:
+    accumulator = PolicyMetricAccumulator()
+    phase_accumulators = _phase_accumulators()
+    model_was_training = model.training
+    model.eval()
+    device = _model_device(model)
+    try:
+        with torch.no_grad():
+            for batch in dataloader:
+                x, labels, legal_mask, move_numbers = _batch_tensors_with_move_numbers(
+                    batch,
+                    device=device,
+                )
+                logits = model(x)
+                accumulator.update(
+                    scores=logits,
+                    labels=labels,
+                    legal_mask=legal_mask,
+                    apply_legal_mask_before_topk=mask_topk,
+                    logits_for_cross_entropy=logits,
+                )
+                _update_phase_metric_accumulators(
+                    phase_accumulators,
+                    logits=logits,
+                    labels=labels,
+                    legal_mask=legal_mask,
+                    move_numbers=move_numbers,
+                    mask_topk=mask_topk,
+                )
+        return accumulator.summary(), _cnn_policy_phase_rows(
+            split,
+            phase_accumulators,
+        )
+    except (BaselineEvaluationError, PolicyMetricError) as exc:
+        raise CnnTrainingError(str(exc)) from exc
+    finally:
+        if model_was_training:
+            model.train()
+
+
+def _validate_split(split: str) -> str:
+    if split not in SPLIT_NAMES:
+        msg = f"split must be one of {', '.join(SPLIT_NAMES)}, got {split}"
+        raise CnnTrainingError(msg)
+    return split
+
+
+def _validate_checkpoint_provenance(
+    checkpoint: CnnPolicyCheckpoint,
+    dataset_path: Path,
+    manifest_path: Path,
+) -> None:
+    _validate_checkpoint_path_match(
+        "dataset_path",
+        checkpoint.dataset_path,
+        dataset_path,
+    )
+    _validate_checkpoint_path_match(
+        "manifest_path",
+        checkpoint.manifest_path,
+        manifest_path,
+    )
+
+
+def _validate_checkpoint_path_match(
+    name: str,
+    checkpoint_path: Path,
+    evaluation_path: Path,
+) -> None:
+    if checkpoint_path.expanduser().resolve() == evaluation_path.expanduser().resolve():
+        return
+
+    msg = (
+        f"{name} does not match checkpoint provenance: checkpoint has "
+        f"{checkpoint_path}, evaluation requested {evaluation_path}"
+    )
+    raise CnnTrainingError(msg)
 
 
 def _validate_config(config: CnnTrainingConfig) -> None:
@@ -360,6 +531,66 @@ def _batch_tensors(
         batch["x"].to(device=device, dtype=torch.float32),
         batch["y"].to(device=device, dtype=torch.int64),
         batch["legal_mask"].to(device=device, dtype=torch.bool),
+    )
+
+
+def _batch_tensors_with_move_numbers(
+    batch: PolicyBatch,
+    *,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    x, labels, legal_mask = _batch_tensors(batch, device=device)
+    return (
+        x,
+        labels,
+        legal_mask,
+        batch["move_number"].to(device=device, dtype=torch.int64),
+    )
+
+
+def _phase_accumulators() -> dict[GamePhase, PolicyMetricAccumulator]:
+    return {phase: PolicyMetricAccumulator() for phase in PHASE_NAMES}
+
+
+def _update_phase_metric_accumulators(
+    accumulators: dict[GamePhase, PolicyMetricAccumulator],
+    *,
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    legal_mask: torch.Tensor,
+    move_numbers: torch.Tensor,
+    mask_topk: bool,
+) -> None:
+    for phase in PHASE_NAMES:
+        example_mask = phase_mask_for_move_numbers(move_numbers, phase)
+        if not bool(example_mask.any().item()):
+            continue
+
+        accumulators[phase].update(
+            scores=logits[example_mask],
+            labels=labels[example_mask],
+            legal_mask=legal_mask[example_mask],
+            apply_legal_mask_before_topk=mask_topk,
+            logits_for_cross_entropy=logits[example_mask],
+        )
+
+
+def _cnn_policy_phase_rows(
+    split: str,
+    accumulators: dict[GamePhase, PolicyMetricAccumulator],
+) -> tuple[BaselinePhaseEvaluationRow, ...]:
+    return tuple(
+        BaselinePhaseEvaluationRow(
+            baseline=MODEL_KIND,
+            split=split,
+            phase=phase,
+            metrics=(
+                accumulators[phase].summary()
+                if accumulators[phase].example_count > 0
+                else None
+            ),
+        )
+        for phase in PHASE_NAMES
     )
 
 
