@@ -10,6 +10,7 @@ from vantago.cli.commands import compare_policy_models as compare_models_command
 from vantago.cli.commands import evaluate_baselines as evaluate_baselines_command
 from vantago.cli.commands import evaluate_cnn_policy as evaluate_cnn_policy_command
 from vantago.cli.commands import fetch_aeb_games as fetch_aeb_games_command
+from vantago.cli.commands import final_evaluation_report as final_report_command
 from vantago.cli.commands import inspect_dataset as inspect_dataset_command
 from vantago.cli.commands import prepare_aeb_dataset as prepare_aeb_dataset_command
 from vantago.cli.commands import process_dataset as process_dataset_command
@@ -87,6 +88,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Train and compare non-neural, MLP, and CNN policy models.",
     )
     compare_models_command.configure_parser(compare_policy_models_parser)
+    final_evaluation_report_parser = subcommands.add_parser(
+        "final-evaluation-report",
+        help="Report final held-out test metrics for selected policy models.",
+    )
+    final_report_command.configure_parser(final_evaluation_report_parser)
     return parser
 
 
@@ -119,6 +125,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_train_cnn_policy(args)
         if args.command == "compare-policy-models":
             return _handle_compare_policy_models(args)
+        if args.command == "final-evaluation-report":
+            return _handle_final_evaluation_report(args)
         parser.error(f"unknown command: {args.command}")
     except SgfParseError as exc:
         parser.exit(status=2, message=f"error: {exc}\n")
@@ -235,6 +243,18 @@ def _handle_compare_policy_models(args: argparse.Namespace) -> int:
         weight_decay=args.weight_decay,
         seed=args.seed,
         mask_topk=args.mask_topk,
+    )
+
+
+def _handle_final_evaluation_report(args: argparse.Namespace) -> int:
+    return final_report_command.final_evaluation_report_command(
+        args.dataset,
+        args.splits,
+        args.checkpoint,
+        batch_size=args.batch_size,
+        seed=args.seed,
+        mask_topk=args.mask_topk,
+        json_out=args.json_out,
     )
 
 
