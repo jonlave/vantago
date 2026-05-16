@@ -6,6 +6,7 @@ import argparse
 from collections.abc import Sequence
 from typing import NoReturn
 
+from vantago.cli.commands import compare_policy_models as compare_models_command
 from vantago.cli.commands import evaluate_baselines as evaluate_baselines_command
 from vantago.cli.commands import evaluate_cnn_policy as evaluate_cnn_policy_command
 from vantago.cli.commands import inspect_dataset as inspect_dataset_command
@@ -69,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Train a CNN policy model and save the best checkpoint.",
     )
     train_cnn_policy_command.configure_parser(train_cnn_policy_parser)
+    compare_policy_models_parser = subcommands.add_parser(
+        "compare-policy-models",
+        help="Train and compare non-neural, MLP, and CNN policy models.",
+    )
+    compare_models_command.configure_parser(compare_policy_models_parser)
     return parser
 
 
@@ -95,6 +101,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_train_mlp_baseline(args)
         if args.command == "train-cnn-policy":
             return _handle_train_cnn_policy(args)
+        if args.command == "compare-policy-models":
+            return _handle_compare_policy_models(args)
         parser.error(f"unknown command: {args.command}")
     except SgfParseError as exc:
         parser.exit(status=2, message=f"error: {exc}\n")
@@ -164,6 +172,24 @@ def _handle_train_cnn_policy(args: argparse.Namespace) -> int:
         epochs=args.epochs,
         batch_size=args.batch_size,
         hidden_channels=args.hidden_channels,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        seed=args.seed,
+        mask_topk=args.mask_topk,
+    )
+
+
+def _handle_compare_policy_models(args: argparse.Namespace) -> int:
+    return compare_models_command.compare_policy_models_command(
+        args.dataset,
+        args.splits,
+        checkpoint_out=args.checkpoint_out,
+        history_out=args.history_out,
+        mlp_history_out=args.mlp_history_out,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        cnn_hidden_channels=args.cnn_hidden_channels,
+        mlp_hidden_size=args.mlp_hidden_size,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         seed=args.seed,
