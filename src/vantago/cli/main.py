@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import NoReturn
 
 from vantago.cli.commands import evaluate_baselines as evaluate_baselines_command
+from vantago.cli.commands import evaluate_cnn_policy as evaluate_cnn_policy_command
 from vantago.cli.commands import inspect_dataset as inspect_dataset_command
 from vantago.cli.commands import process_dataset as process_dataset_command
 from vantago.cli.commands import replay_batch as replay_batch_command
@@ -53,6 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Evaluate random legal and frequency baselines on a split.",
     )
     evaluate_baselines_command.configure_parser(evaluate_baselines_parser)
+    evaluate_cnn_policy_parser = subcommands.add_parser(
+        "evaluate-cnn-policy",
+        help="Evaluate a saved CNN policy checkpoint on a split.",
+    )
+    evaluate_cnn_policy_command.configure_parser(evaluate_cnn_policy_parser)
     train_mlp_baseline_parser = subcommands.add_parser(
         "train-mlp-baseline",
         help="Train a flattened-board MLP baseline and report validation metrics.",
@@ -83,6 +89,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_split_dataset(args)
         if args.command == "evaluate-baselines":
             return _handle_evaluate_baselines(args)
+        if args.command == "evaluate-cnn-policy":
+            return _handle_evaluate_cnn_policy(args)
         if args.command == "train-mlp-baseline":
             return _handle_train_mlp_baseline(args)
         if args.command == "train-cnn-policy":
@@ -118,6 +126,17 @@ def _handle_evaluate_baselines(args: argparse.Namespace) -> int:
         args.splits,
         args.split,
         args.seed,
+        args.mask_topk,
+    )
+
+
+def _handle_evaluate_cnn_policy(args: argparse.Namespace) -> int:
+    return evaluate_cnn_policy_command.evaluate_cnn_policy_command(
+        args.dataset,
+        args.splits,
+        args.checkpoint,
+        args.split,
+        args.batch_size,
         args.mask_topk,
     )
 

@@ -3,9 +3,11 @@
 from vantago.training.cnn import (
     CnnEpochResult,
     CnnPolicyCheckpoint,
+    CnnPolicyEvaluationResult,
     CnnTrainingConfig,
     CnnTrainingError,
     CnnTrainingResult,
+    evaluate_cnn_policy_checkpoint,
     load_cnn_policy_checkpoint,
     train_cnn_policy,
 )
@@ -13,9 +15,11 @@ from vantago.training.cnn import (
 __all__ = [
     "CnnEpochResult",
     "CnnPolicyCheckpoint",
+    "CnnPolicyEvaluationResult",
     "CnnTrainingConfig",
     "CnnTrainingError",
     "CnnTrainingResult",
+    "evaluate_cnn_policy_checkpoint",
     "load_cnn_policy_checkpoint",
     "train_cnn_policy",
 ]

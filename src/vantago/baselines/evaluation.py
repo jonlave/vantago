@@ -33,6 +33,7 @@ BaselineName: TypeAlias = Literal[
     "frequency_overall",
     "frequency_by_phase",
     "mlp_flattened",
+    "cnn_policy",
 ]
 
 PHASE_NAMES: tuple[GamePhase, ...] = ("opening", "middle_game", "endgame")
@@ -45,6 +46,7 @@ BASELINE_NAMES: tuple[NonNeuralBaselineName, ...] = NON_NEURAL_BASELINE_NAMES
 COMPARISON_BASELINE_NAMES: tuple[BaselineName, ...] = (
     *NON_NEURAL_BASELINE_NAMES,
     "mlp_flattened",
+    "cnn_policy",
 )
 DEFAULT_EVALUATION_BATCH_SIZE = 4096
 
