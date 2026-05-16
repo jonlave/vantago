@@ -7,7 +7,10 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vantago.cli.commands.evaluate_baselines import format_baseline_rows
+from vantago.cli.commands.evaluate_baselines import (
+    format_baseline_phase_rows,
+    format_baseline_rows,
+)
 
 if TYPE_CHECKING:
     from vantago.baselines import (
@@ -123,6 +126,13 @@ def train_mlp_baseline_command(
     print()
     print(
         format_baseline_rows((*baseline_result.rows, mlp_result.validation_row)),
+        end="",
+    )
+    print()
+    print(
+        format_baseline_phase_rows(
+            (*baseline_result.phase_rows, *mlp_result.validation_phase_rows)
+        ),
         end="",
     )
     return 0

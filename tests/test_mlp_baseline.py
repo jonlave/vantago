@@ -13,6 +13,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from vantago.baselines import (
+    PHASE_NAMES,
+    BaselinePhaseEvaluationRow,
     FlattenedMlpPolicy,
     MlpBaselineConfig,
     MlpBaselineTrainingError,
@@ -73,6 +75,12 @@ def test_train_mlp_baseline_smoke_records_validation_metrics(
     assert result.validation_row.metrics.example_count == 1
     assert result.validation_row.metrics.cross_entropy is not None
     assert result.validation_row.metrics == result.history[-1].validation_metrics
+    assert tuple(row.phase for row in result.validation_phase_rows) == PHASE_NAMES
+    assert all(row.baseline == "mlp_flattened" for row in result.validation_phase_rows)
+    assert result.validation_phase_rows[0].metrics is not None
+    assert result.validation_phase_rows[0].metrics.example_count == 1
+    assert result.validation_phase_rows[1].metrics is None
+    assert result.validation_phase_rows[2].metrics is None
 
 
 def test_train_mlp_baseline_is_repeatable_with_same_seed(tmp_path: Path) -> None:
@@ -97,6 +105,47 @@ def test_train_mlp_baseline_is_repeatable_with_same_seed(tmp_path: Path) -> None
     )
     assert second.validation_row.metrics.cross_entropy == pytest.approx(
         first.validation_row.metrics.cross_entropy
+    )
+
+
+def test_train_mlp_baseline_phase_metrics_partition_validation_metrics(
+    tmp_path: Path,
+) -> None:
+    dataset_path, manifest_path = _write_fixture(tmp_path, _phase_records())
+
+    result = train_mlp_baseline(
+        dataset_path,
+        manifest_path,
+        config=MlpBaselineConfig(
+            epochs=1,
+            batch_size=4,
+            hidden_size=8,
+            learning_rate=1e-2,
+            weight_decay=0.0,
+            seed=13,
+        ),
+    )
+
+    phase_rows = result.validation_phase_rows
+    assert tuple(row.phase for row in phase_rows) == PHASE_NAMES
+    assert all(row.metrics is not None for row in phase_rows)
+    assert sum(row.metrics.example_count for row in phase_rows if row.metrics) == (
+        result.validation_row.metrics.example_count
+    )
+    assert result.validation_row.metrics.top_1 == pytest.approx(
+        _weighted_phase_metric(phase_rows, "top_1")
+    )
+    assert result.validation_row.metrics.top_3 == pytest.approx(
+        _weighted_phase_metric(phase_rows, "top_3")
+    )
+    assert result.validation_row.metrics.top_5 == pytest.approx(
+        _weighted_phase_metric(phase_rows, "top_5")
+    )
+    assert result.validation_row.metrics.illegal_move_rate == pytest.approx(
+        _weighted_phase_metric(phase_rows, "illegal_move_rate")
+    )
+    assert result.validation_row.metrics.cross_entropy == pytest.approx(
+        _weighted_phase_metric(phase_rows, "cross_entropy")
     )
 
 
@@ -135,12 +184,11 @@ def test_evaluate_mlp_policy_mask_topk_changes_topk_not_raw_illegal_rate() -> No
     logits[0, 1] = 9.0
     legal_mask = torch.zeros((1, POINT_COUNT), dtype=torch.bool)
     legal_mask[0, 1] = True
-    batch: PolicyBatch = {
+    batch = {
         "x": torch.zeros((1, CHANNEL_COUNT, BOARD_SIZE, BOARD_SIZE)),
         "y": torch.tensor([1], dtype=torch.int64),
         "legal_mask": legal_mask,
         "game_id": ["game-00.sgf"],
-        "move_number": torch.tensor([1], dtype=torch.int64),
         "source_name": ["game-00.sgf"],
     }
     dataloader = cast(DataLoader[PolicyBatch], [batch])
@@ -220,9 +268,27 @@ def test_train_mlp_baseline_cli_prints_epoch_and_comparison_tables(
             "illegal_move_rate",
         ]
     )
+    phase_header_index = next(
+        index
+        for index, line in enumerate(lines)
+        if line.split()
+        == [
+            "baseline",
+            "phase",
+            "examples",
+            "top_1",
+            "top_3",
+            "top_5",
+            "cross_entropy",
+            "illegal_move_rate",
+        ]
+    )
     rows_by_name = {
         values[0]: values
-        for values in (line.split() for line in lines[baseline_header_index + 1 :])
+        for values in (
+            line.split()
+            for line in lines[baseline_header_index + 1 : phase_header_index - 1]
+        )
     }
     assert set(rows_by_name) == {
         "random_legal",
@@ -231,6 +297,20 @@ def test_train_mlp_baseline_cli_prints_epoch_and_comparison_tables(
         "mlp_flattened",
     }
     assert rows_by_name["mlp_flattened"][5] != "n/a"
+
+    phase_rows = [
+        line.split()
+        for line in lines[phase_header_index + 1 :]
+    ]
+    assert len(phase_rows) == 4 * len(PHASE_NAMES)
+    assert {
+        (values[0], values[1])
+        for values in phase_rows
+        if values[0] == "mlp_flattened"
+    } == {
+        ("mlp_flattened", phase)
+        for phase in PHASE_NAMES
+    }
 
 
 class _FixedPolicy(nn.Module):
@@ -269,6 +349,80 @@ def _records() -> tuple[_FixtureRecord, ...]:
             legal_labels=(4,),
         ),
     )
+
+
+def _phase_records() -> tuple[_FixtureRecord, ...]:
+    train_records = (
+        _FixtureRecord(
+            game_id="game-00.sgf",
+            move_number=40,
+            y=5,
+            legal_labels=(5,),
+        ),
+        _FixtureRecord(
+            game_id="game-01.sgf",
+            move_number=41,
+            y=6,
+            legal_labels=(6,),
+        ),
+        _FixtureRecord(
+            game_id="game-02.sgf",
+            move_number=151,
+            y=7,
+            legal_labels=(7,),
+        ),
+        *tuple(
+            _FixtureRecord(
+                game_id=f"game-{index:02d}.sgf",
+                move_number=1,
+                y=10 + index,
+                legal_labels=(10 + index,),
+            )
+            for index in range(3, 8)
+        ),
+    )
+    return (
+        *train_records,
+        _FixtureRecord(
+            game_id="game-08.sgf",
+            move_number=40,
+            y=5,
+            legal_labels=(5,),
+        ),
+        _FixtureRecord(
+            game_id="game-08.sgf",
+            move_number=41,
+            y=6,
+            legal_labels=(6,),
+        ),
+        _FixtureRecord(
+            game_id="game-08.sgf",
+            move_number=151,
+            y=7,
+            legal_labels=(7,),
+        ),
+        _FixtureRecord(
+            game_id="game-09.sgf",
+            move_number=1,
+            y=4,
+            legal_labels=(4,),
+        ),
+    )
+
+
+def _weighted_phase_metric(
+    rows: Sequence[BaselinePhaseEvaluationRow],
+    metric_name: str,
+) -> float:
+    total = 0.0
+    example_count = 0
+    for row in rows:
+        assert row.metrics is not None
+        value = getattr(row.metrics, metric_name)
+        assert isinstance(value, float)
+        total += value * row.metrics.example_count
+        example_count += row.metrics.example_count
+    return total / example_count
 
 
 def _write_fixture(

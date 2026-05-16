@@ -63,6 +63,16 @@ class BaselineEvaluationRow:
 
 
 @dataclass(frozen=True, slots=True)
+class BaselinePhaseEvaluationRow:
+    """Metric row for one baseline in one game phase."""
+
+    baseline: BaselineName
+    split: str
+    phase: GamePhase
+    metrics: PolicyMetricSummary | None
+
+
+@dataclass(frozen=True, slots=True)
 class BaselineEvaluationResult:
     """Structured result for non-neural baseline evaluation."""
 
@@ -72,6 +82,7 @@ class BaselineEvaluationResult:
     seed: int
     mask_topk: bool
     rows: tuple[BaselineEvaluationRow, ...]
+    phase_rows: tuple[BaselinePhaseEvaluationRow, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +105,24 @@ def game_phase_for_move_number(move_number: int) -> GamePhase:
     return "endgame"
 
 
+def phase_mask_for_move_numbers(
+    move_numbers: torch.Tensor,
+    phase: str,
+) -> torch.Tensor:
+    """Return a boolean mask for one roadmap phase over move numbers."""
+
+    _validate_move_numbers(move_numbers)
+    if phase == "opening":
+        return move_numbers <= 40
+    if phase == "middle_game":
+        return (move_numbers >= 41) & (move_numbers <= 150)
+    if phase == "endgame":
+        return move_numbers >= 151
+
+    msg = f"phase must be one of {', '.join(PHASE_NAMES)}, got {phase}"
+    raise BaselineEvaluationError(msg)
+
+
 def evaluate_baselines(
     dataset_path: Path,
     manifest_path: Path,
@@ -114,7 +143,7 @@ def evaluate_baselines(
     eval_dataset = datasets[split_name]
 
     overall_counts, phase_counts = _fit_frequency_counts(train_dataset)
-    rows = _evaluate_all_baselines(
+    rows, phase_rows = _evaluate_all_baselines(
         eval_dataset=eval_dataset,
         overall_counts=overall_counts,
         phase_counts=phase_counts,
@@ -129,6 +158,7 @@ def evaluate_baselines(
         seed=seed,
         mask_topk=mask_topk,
         rows=rows,
+        phase_rows=phase_rows,
     )
 
 
@@ -194,43 +224,85 @@ def _evaluate_all_baselines(
     split: str,
     seed: int,
     mask_topk: bool,
-) -> tuple[BaselineEvaluationRow, ...]:
+) -> tuple[tuple[BaselineEvaluationRow, ...], tuple[BaselinePhaseEvaluationRow, ...]]:
     _ensure_nonempty_dataset(eval_dataset)
     random_accumulator = PolicyMetricAccumulator()
     overall_accumulator = PolicyMetricAccumulator()
     phase_accumulator = PolicyMetricAccumulator()
+    random_phase_accumulators = _phase_accumulators()
+    overall_phase_accumulators = _phase_accumulators()
+    phase_phase_accumulators = _phase_accumulators()
     generator = torch.Generator()
     generator.manual_seed(seed)
 
     for batch in _iter_dataset_batches(eval_dataset):
+        random_scores = _random_legal_scores(batch.legal_mask, generator=generator)
+        overall_scores = _frequency_scores(overall_counts, len(batch.labels))
+        phase_scores = _phase_frequency_scores(
+            overall_counts=overall_counts,
+            phase_counts=phase_counts,
+            move_numbers=batch.move_numbers,
+        )
         _update_metric_accumulator(
             random_accumulator,
-            scores=_random_legal_scores(batch.legal_mask, generator=generator),
+            scores=random_scores,
+            batch=batch,
+            mask_topk=mask_topk,
+        )
+        _update_phase_metric_accumulators(
+            random_phase_accumulators,
+            scores=random_scores,
             batch=batch,
             mask_topk=mask_topk,
         )
         _update_metric_accumulator(
             overall_accumulator,
-            scores=_frequency_scores(overall_counts, len(batch.labels)),
+            scores=overall_scores,
+            batch=batch,
+            mask_topk=mask_topk,
+        )
+        _update_phase_metric_accumulators(
+            overall_phase_accumulators,
+            scores=overall_scores,
             batch=batch,
             mask_topk=mask_topk,
         )
         _update_metric_accumulator(
             phase_accumulator,
-            scores=_phase_frequency_scores(
-                overall_counts=overall_counts,
-                phase_counts=phase_counts,
-                move_numbers=batch.move_numbers,
-            ),
+            scores=phase_scores,
+            batch=batch,
+            mask_topk=mask_topk,
+        )
+        _update_phase_metric_accumulators(
+            phase_phase_accumulators,
+            scores=phase_scores,
             batch=batch,
             mask_topk=mask_topk,
         )
 
-    return (
+    rows = (
         _baseline_row("random_legal", split, random_accumulator),
         _baseline_row("frequency_overall", split, overall_accumulator),
         _baseline_row("frequency_by_phase", split, phase_accumulator),
     )
+    phase_rows = (
+        *_baseline_phase_rows(
+            "random_legal",
+            split,
+            random_phase_accumulators,
+        ),
+        *_baseline_phase_rows(
+            "frequency_overall",
+            split,
+            overall_phase_accumulators,
+        ),
+        *_baseline_phase_rows(
+            "frequency_by_phase",
+            split,
+            phase_phase_accumulators,
+        ),
+    )
+    return rows, phase_rows
 
 
 def _iter_dataset_batches(
@@ -249,11 +321,13 @@ def _dataset_batch(
     stop: int,
 ) -> _BaselineBatch:
     batch = dataset.metadata_batch(start, stop)
+    move_numbers = batch["move_number"].to(dtype=torch.int64)
+    _validate_move_numbers(move_numbers)
 
     return _BaselineBatch(
         labels=batch["y"].to(dtype=torch.int64),
         legal_mask=batch["legal_mask"].to(dtype=torch.bool),
-        move_numbers=batch["move_number"].to(dtype=torch.int64),
+        move_numbers=move_numbers,
     )
 
 
@@ -293,11 +367,19 @@ def _phase_frequency_scores(
 
 
 def _phase_mask(move_numbers: torch.Tensor, phase: GamePhase) -> torch.Tensor:
-    if phase == "opening":
-        return move_numbers <= 40
-    if phase == "middle_game":
-        return (move_numbers >= 41) & (move_numbers <= 150)
-    return move_numbers >= 151
+    return phase_mask_for_move_numbers(move_numbers, phase)
+
+
+def _validate_move_numbers(move_numbers: torch.Tensor) -> None:
+    if move_numbers.ndim != 1:
+        msg = f"move_numbers must have shape [N], got {tuple(move_numbers.shape)}"
+        raise BaselineEvaluationError(msg)
+    if move_numbers.dtype not in (torch.int8, torch.int16, torch.int32, torch.int64):
+        msg = f"move_numbers must be an integer tensor, got {move_numbers.dtype}"
+        raise BaselineEvaluationError(msg)
+    if bool((move_numbers < 1).any().item()):
+        msg = "move_numbers must be positive"
+        raise BaselineEvaluationError(msg)
 
 
 def _update_metric_accumulator(
@@ -318,6 +400,41 @@ def _update_metric_accumulator(
         raise BaselineEvaluationError(str(exc)) from exc
 
 
+def _phase_accumulators() -> dict[GamePhase, PolicyMetricAccumulator]:
+    return {phase: PolicyMetricAccumulator() for phase in PHASE_NAMES}
+
+
+def _update_phase_metric_accumulators(
+    accumulators: dict[GamePhase, PolicyMetricAccumulator],
+    *,
+    scores: torch.Tensor,
+    batch: _BaselineBatch,
+    mask_topk: bool,
+) -> None:
+    for phase in PHASE_NAMES:
+        example_mask = _phase_mask(batch.move_numbers, phase)
+        if not bool(example_mask.any().item()):
+            continue
+
+        _update_metric_accumulator(
+            accumulators[phase],
+            scores=scores[example_mask],
+            batch=_filter_batch(batch, example_mask),
+            mask_topk=mask_topk,
+        )
+
+
+def _filter_batch(
+    batch: _BaselineBatch,
+    example_mask: torch.Tensor,
+) -> _BaselineBatch:
+    return _BaselineBatch(
+        labels=batch.labels[example_mask],
+        legal_mask=batch.legal_mask[example_mask],
+        move_numbers=batch.move_numbers[example_mask],
+    )
+
+
 def _baseline_row(
     baseline: NonNeuralBaselineName,
     split: str,
@@ -331,4 +448,24 @@ def _baseline_row(
         baseline=baseline,
         split=split,
         metrics=metrics,
+    )
+
+
+def _baseline_phase_rows(
+    baseline: BaselineName,
+    split: str,
+    accumulators: dict[GamePhase, PolicyMetricAccumulator],
+) -> tuple[BaselinePhaseEvaluationRow, ...]:
+    return tuple(
+        BaselinePhaseEvaluationRow(
+            baseline=baseline,
+            split=split,
+            phase=phase,
+            metrics=(
+                accumulators[phase].summary()
+                if accumulators[phase].example_count > 0
+                else None
+            ),
+        )
+        for phase in PHASE_NAMES
     )

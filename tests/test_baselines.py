@@ -9,17 +9,21 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 from vantago.baselines import (
     BASELINE_NAMES,
     COMPARISON_BASELINE_NAMES,
     NON_NEURAL_BASELINE_NAMES,
+    PHASE_NAMES,
     BaselineEvaluationError,
     BaselineEvaluationResult,
     BaselineEvaluationRow,
+    BaselinePhaseEvaluationRow,
     evaluate_baselines,
     game_phase_for_move_number,
 )
+from vantago.baselines.evaluation import phase_mask_for_move_numbers
 from vantago.cli.main import main
 
 BOARD_SIZE = 19
@@ -46,6 +50,29 @@ def test_game_phase_for_move_number_uses_roadmap_boundaries() -> None:
         game_phase_for_move_number(0)
 
 
+def test_phase_mask_rejects_unknown_phase() -> None:
+    move_numbers = torch.tensor([1, 41, 151], dtype=torch.int64)
+
+    with pytest.raises(BaselineEvaluationError, match="phase must be one of"):
+        phase_mask_for_move_numbers(move_numbers, "middle-earth")
+
+
+def test_evaluate_baselines_rejects_non_positive_move_numbers(
+    tmp_path: Path,
+) -> None:
+    dataset_path, manifest_path = _write_fixture(
+        tmp_path,
+        _records(
+            validation_y=5,
+            validation_move_number=0,
+            validation_legal_labels=(5,),
+        ),
+    )
+
+    with pytest.raises(BaselineEvaluationError, match="move_number.*positive"):
+        evaluate_baselines(dataset_path, manifest_path)
+
+
 def test_baseline_name_contract_matches_non_neural_evaluator(
     tmp_path: Path,
 ) -> None:
@@ -59,6 +86,55 @@ def test_baseline_name_contract_matches_non_neural_evaluator(
     assert BASELINE_NAMES == NON_NEURAL_BASELINE_NAMES
     assert (*NON_NEURAL_BASELINE_NAMES, "mlp_flattened") == COMPARISON_BASELINE_NAMES
     assert tuple(row.baseline for row in result.rows) == BASELINE_NAMES
+
+
+def test_evaluate_baselines_reports_metrics_for_each_phase(
+    tmp_path: Path,
+) -> None:
+    dataset_path, manifest_path = _write_fixture(tmp_path, _phase_records())
+
+    result = evaluate_baselines(dataset_path, manifest_path, seed=123)
+
+    assert tuple(
+        (row.baseline, row.phase)
+        for row in result.phase_rows
+    ) == tuple(
+        (baseline, phase)
+        for baseline in BASELINE_NAMES
+        for phase in PHASE_NAMES
+    )
+    for baseline in BASELINE_NAMES:
+        overall = _row(result, baseline).metrics
+        phase_rows = [
+            row
+            for row in result.phase_rows
+            if row.baseline == baseline
+        ]
+        phase_top_1_total = 0.0
+        phase_example_count = 0
+        for row in phase_rows:
+            assert row.metrics is not None
+            assert row.metrics.example_count == 1
+            phase_top_1_total += row.metrics.top_1 * row.metrics.example_count
+            phase_example_count += row.metrics.example_count
+
+        assert phase_example_count == overall.example_count
+        assert overall.top_1 == pytest.approx(
+            phase_top_1_total / phase_example_count
+        )
+        assert overall.top_3 == pytest.approx(
+            _weighted_phase_metric(phase_rows, "top_3")
+        )
+        assert overall.top_5 == pytest.approx(
+            _weighted_phase_metric(phase_rows, "top_5")
+        )
+        assert overall.illegal_move_rate == pytest.approx(
+            _weighted_phase_metric(phase_rows, "illegal_move_rate")
+        )
+        assert overall.cross_entropy is None
+        for row in phase_rows:
+            assert row.metrics is not None
+            assert row.metrics.cross_entropy is None
 
 
 def test_random_legal_baseline_ranks_only_legal_points(tmp_path: Path) -> None:
@@ -198,7 +274,7 @@ def test_evaluate_baselines_cli_prints_comparable_table(
     ]
     rows_by_name = {
         values[0]: values
-        for values in (line.split() for line in lines[1:])
+        for values in (line.split() for line in lines[1:4])
     }
     assert set(rows_by_name) == {
         "random_legal",
@@ -209,6 +285,36 @@ def test_evaluate_baselines_cli_prints_comparable_table(
         assert len(values) == 7
         assert values[1] == "1"
         assert values[5] == "n/a"
+
+    phase_header_index = next(
+        index
+        for index, line in enumerate(lines)
+        if line.split()
+        == [
+            "baseline",
+            "phase",
+            "examples",
+            "top_1",
+            "top_3",
+            "top_5",
+            "cross_entropy",
+            "illegal_move_rate",
+        ]
+    )
+    phase_rows = [
+        line.split()
+        for line in lines[phase_header_index + 1 :]
+    ]
+    assert len(phase_rows) == len(BASELINE_NAMES) * len(PHASE_NAMES)
+    assert [values[1] for values in phase_rows[:3]] == list(PHASE_NAMES)
+    empty_phase_values = [
+        values
+        for values in phase_rows
+        if values[1] in {"middle_game", "endgame"}
+    ]
+    assert empty_phase_values
+    for values in empty_phase_values:
+        assert values[2:] == ["0", "n/a", "n/a", "n/a", "n/a", "n/a"]
 
 
 def test_cli_main_does_not_eagerly_import_torch() -> None:
@@ -297,6 +403,65 @@ def _multi_legal_records() -> tuple[_FixtureRecord, ...]:
     )
 
 
+def _phase_records() -> tuple[_FixtureRecord, ...]:
+    train_records = (
+        _FixtureRecord(
+            game_id="game-00.sgf",
+            move_number=40,
+            y=5,
+            legal_labels=(5,),
+        ),
+        _FixtureRecord(
+            game_id="game-01.sgf",
+            move_number=41,
+            y=6,
+            legal_labels=(6,),
+        ),
+        _FixtureRecord(
+            game_id="game-02.sgf",
+            move_number=151,
+            y=7,
+            legal_labels=(7,),
+        ),
+        *tuple(
+            _FixtureRecord(
+                game_id=f"game-{index:02d}.sgf",
+                move_number=1,
+                y=10 + index,
+                legal_labels=(10 + index,),
+            )
+            for index in range(3, 8)
+        ),
+    )
+    return (
+        *train_records,
+        _FixtureRecord(
+            game_id="game-08.sgf",
+            move_number=40,
+            y=5,
+            legal_labels=(5,),
+        ),
+        _FixtureRecord(
+            game_id="game-08.sgf",
+            move_number=41,
+            y=6,
+            legal_labels=(6,),
+        ),
+        _FixtureRecord(
+            game_id="game-08.sgf",
+            move_number=151,
+            y=7,
+            legal_labels=(7,),
+        ),
+        _FixtureRecord(
+            game_id="game-09.sgf",
+            move_number=1,
+            y=4,
+            legal_labels=(4,),
+        ),
+    )
+
+
 def _row(
     result: BaselineEvaluationResult,
     baseline: str,
@@ -305,6 +470,21 @@ def _row(
         if row.baseline == baseline:
             return row
     raise AssertionError(f"missing baseline row: {baseline}")
+
+
+def _weighted_phase_metric(
+    rows: Sequence[BaselinePhaseEvaluationRow],
+    metric_name: str,
+) -> float:
+    total = 0.0
+    example_count = 0
+    for row in rows:
+        assert row.metrics is not None
+        value = getattr(row.metrics, metric_name)
+        assert isinstance(value, float)
+        total += value * row.metrics.example_count
+        example_count += row.metrics.example_count
+    return total / example_count
 
 
 def _write_fixture(
