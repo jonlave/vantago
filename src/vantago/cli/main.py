@@ -14,6 +14,7 @@ from vantago.cli.commands import final_evaluation_report as final_report_command
 from vantago.cli.commands import inspect_dataset as inspect_dataset_command
 from vantago.cli.commands import prepare_aeb_dataset as prepare_aeb_dataset_command
 from vantago.cli.commands import process_dataset as process_dataset_command
+from vantago.cli.commands import qualitative_analysis as qualitative_analysis_command
 from vantago.cli.commands import replay_batch as replay_batch_command
 from vantago.cli.commands import split_dataset as split_dataset_command
 from vantago.cli.commands import train_cnn_policy as train_cnn_policy_command
@@ -93,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report final held-out test metrics for selected policy models.",
     )
     final_report_command.configure_parser(final_evaluation_report_parser)
+    qualitative_analysis_parser = subcommands.add_parser(
+        "qualitative-analysis",
+        help="Inspect qualitative model mistakes and prediction heatmaps.",
+    )
+    qualitative_analysis_command.configure_parser(qualitative_analysis_parser)
     return parser
 
 
@@ -127,6 +133,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_compare_policy_models(args)
         if args.command == "final-evaluation-report":
             return _handle_final_evaluation_report(args)
+        if args.command == "qualitative-analysis":
+            return _handle_qualitative_analysis(args)
         parser.error(f"unknown command: {args.command}")
     except SgfParseError as exc:
         parser.exit(status=2, message=f"error: {exc}\n")
@@ -253,6 +261,20 @@ def _handle_final_evaluation_report(args: argparse.Namespace) -> int:
         args.checkpoint,
         batch_size=args.batch_size,
         seed=args.seed,
+        mask_topk=args.mask_topk,
+        json_out=args.json_out,
+    )
+
+
+def _handle_qualitative_analysis(args: argparse.Namespace) -> int:
+    return qualitative_analysis_command.qualitative_analysis_command(
+        args.dataset,
+        args.splits,
+        args.checkpoint,
+        split=args.split,
+        batch_size=args.batch_size,
+        top_k=args.top_k,
+        examples_per_phase=args.examples_per_phase,
         mask_topk=args.mask_topk,
         json_out=args.json_out,
     )
